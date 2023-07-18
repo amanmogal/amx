@@ -87,10 +87,15 @@ public:
 
 #if defined(ENABLE_OV_IR_FRONTEND)
 
+// Disable the following tests, caused by unsupported "readlink()" func call in WASM
+#    ifndef __EMSCRIPTEN__
+
 TEST_F(OVExtensionTests, ReshapeIRWithNewExtensionsLib) {
     core.add_extension(getOVExtensionPath());
     test();
 }
+
+#    endif
 
 TEST_F(OVExtensionTests, ReshapeIRWithNewExtensionPtr) {
     core.add_extension(std::make_shared<ov::OpExtension<CustomNewIdentity>>());
@@ -138,6 +143,9 @@ TEST_F(OVExtensionTests, ReshapeIRWithSeveralNewOps) {
     test_two_op();
 }
 
+// Disable the following tests, caused by unsupported "readlink()" func call in WASM
+#    ifndef __EMSCRIPTEN__
+
 TEST_F(OVExtensionTests, load_new_extension) {
     EXPECT_NO_THROW(core.add_extension(getOVExtensionPath()));
 }
@@ -153,5 +161,7 @@ TEST_F(OVExtensionTests, load_incorrect_extension) {
 TEST_F(OVExtensionTests, load_relative) {
     EXPECT_NO_THROW(core.add_extension(getRelativeOVExtensionPath()));
 }
+
+#    endif
 
 #endif  // defined(ENABLE_OV_IR_FRONTEND)

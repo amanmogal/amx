@@ -194,6 +194,38 @@ ov::SupportedOpsMap MockPlugin::query_model(const std::shared_ptr<const ov::Mode
 std::queue<std::shared_ptr<ov::IPlugin>> targets;
 std::mutex targets_mutex;
 
+#ifdef __EMSCRIPTEN__
+static const ov::Version version = {"0", "mock_plugin"};
+OPENVINO_PLUGIN_API void OV_CREATE_PLUGIN(::std::shared_ptr<::ov::IPlugin>& plugin) noexcept(false);
+void OV_CREATE_PLUGIN(::std::shared_ptr<::ov::IPlugin>& plugin) noexcept(false) {
+    try {
+        std::shared_ptr<ov::IPlugin> internal_plugin;
+        if (targets.empty()) {
+            internal_plugin = std::make_shared<MockInternalPlugin>();
+        } else {
+            std::lock_guard<std::mutex> lock(targets_mutex);
+            internal_plugin = targets.front();
+            targets.pop();
+        }
+        plugin = std::make_shared<MockPlugin>(internal_plugin);
+        plugin->set_version(version);
+    } catch (const InferenceEngine::Exception& ex) {
+        OPENVINO_THROW(ex.what());
+    } catch (const std::exception& ex) {
+        OPENVINO_THROW(ex.what());
+    }
+}
+
+void InjectProxyEngine(InferenceEngine::IInferencePlugin* target) {
+    std::lock_guard<std::mutex> lock(targets_mutex);
+    targets.push(std::make_shared<MockInternalPlugin>(target));
+}
+
+void InjectPlugin(ov::IPlugin* target) {
+    std::lock_guard<std::mutex> lock(targets_mutex);
+    targets.push(std::make_shared<MockInternalPlugin>(target));
+}
+#else
 OPENVINO_PLUGIN_API void CreatePluginEngine(std::shared_ptr<ov::IPlugin>& plugin) {
     std::shared_ptr<ov::IPlugin> internal_plugin;
     if (targets.empty()) {
@@ -215,3 +247,4 @@ OPENVINO_PLUGIN_API void InjectPlugin(ov::IPlugin* target) {
     std::lock_guard<std::mutex> lock(targets_mutex);
     targets.push(std::make_shared<MockInternalPlugin>(target));
 }
+#endif

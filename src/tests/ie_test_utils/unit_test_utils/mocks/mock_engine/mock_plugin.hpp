@@ -19,6 +19,7 @@ class MockPlugin : public ov::IPlugin {
 
 public:
     explicit MockPlugin(const std::shared_ptr<ov::IPlugin>& target);
+    explicit MockPlugin() {}
 
     std::shared_ptr<ov::ICompiledModel> compile_model(const std::shared_ptr<const ov::Model>& model,
                                                       const ov::AnyMap& properties) const override;
@@ -45,3 +46,8 @@ public:
     ov::SupportedOpsMap query_model(const std::shared_ptr<const ov::Model>& model,
                                     const ov::AnyMap& properties) const override;
 };
+
+#ifdef __EMSCRIPTEN__
+OPENVINO_PLUGIN_API void InjectProxyEngine(InferenceEngine::IInferencePlugin* target) noexcept(false);
+OPENVINO_PLUGIN_API void InjectPlugin(ov::IPlugin* target) noexcept(false);
+#endif

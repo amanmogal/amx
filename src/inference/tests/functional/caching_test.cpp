@@ -19,6 +19,7 @@
 #include "cpp_interfaces/interface/ie_iexecutable_network_internal.hpp"
 #include "cpp_interfaces/interface/ie_internal_plugin_config.hpp"
 #include "cpp_interfaces/interface/ie_iplugin_internal.hpp"
+#include "functional_test_utils/skip_tests_config.hpp"
 #include "functional_test_utils/test_model/test_model.hpp"
 #include "ie_core.hpp"
 #include "ie_metric_helpers.hpp"
@@ -30,6 +31,10 @@
 #include "unit_test_utils/mocks/cpp_interfaces/interface/mock_iexecutable_network_internal.hpp"
 #include "unit_test_utils/mocks/mock_iexecutable_network.hpp"
 #include "unit_test_utils/mocks/mock_iinfer_request.hpp"
+
+#ifdef __EMSCRIPTEN__
+#    include "unit_test_utils/mocks/mock_engine/mock_plugin.hpp"
+#endif
 
 using namespace InferenceEngine;
 using namespace ::testing;
@@ -289,10 +294,12 @@ public:
         initParamTest();
         mockPlugin = std::make_shared<MockCachingInferencePlugin>();
         setupMock(*mockPlugin);
+        SKIP_IF_CURRENT_TEST_IS_DISABLED()
+#ifndef __EMSCRIPTEN__
         std::string libraryPath = get_mock_engine_path();
         sharedObjectLoader = ov::util::load_shared_object(libraryPath.c_str());
         injectProxyEngine = make_std_function<void(IInferencePlugin*)>("InjectProxyEngine");
-
+#endif
         FuncTestUtils::TestModel::generateTestModel(modelName, weightsName);
     }
 
@@ -310,12 +317,17 @@ public:
 
     void testLoad(const std::function<void(Core& ie)>& func) {
         Core ie;
+#ifndef __EMSCRIPTEN__
         injectProxyEngine(mockPlugin.get());
         ie.RegisterPlugin(ov::util::make_plugin_library_name(CommonTestUtils::getExecutableDirectory(),
                                                              std::string("mock_engine") + IE_BUILD_POSTFIX),
                           deviceName);
         func(ie);
         ie.UnregisterPlugin(deviceName);
+#else
+        InjectProxyEngine(mockPlugin.get());
+        func(ie);
+#endif
     }
 
     LoadFunction getLoadFunction(TestLoadType type) const {
@@ -566,7 +578,6 @@ TEST_P(CachingTest, TestLoad) {
         });
         EXPECT_EQ(networks.size(), 1);
     }
-
     {
         EXPECT_CALL(*mockPlugin, LoadExeNetworkImpl(_, _, _)).Times(0);
         EXPECT_CALL(*mockPlugin, LoadExeNetworkImpl(_, _)).Times(0);
@@ -1409,7 +1420,10 @@ TEST_P(CachingTest, TestChangeCacheDirFailure) {
         });
         testLoad([&](Core& ie) {
             ie.SetConfig({{CONFIG_KEY(CACHE_DIR), m_cacheDir}});
+// Disable the following ASSERTION, caused by "mkdir()" func call support long name in WASM
+#ifndef __EMSCRIPTEN__
             EXPECT_ANY_THROW(ie.SetConfig({{CONFIG_KEY(CACHE_DIR), m_cacheDir + "/" + longName}}));
+#endif
             m_testFunction(ie);
         });
     }
