@@ -36,6 +36,7 @@
 #include "utils/general_utils.h"
 #include "utils/ngraph_utils.hpp"
 #include "utils/node_dumper.h"
+#include "utils/profiler.hpp"
 #include "utils/verbose.h"
 
 #include <oneapi/dnnl/dnnl.hpp>
@@ -921,6 +922,7 @@ bool Graph::ProcessDynNodes() {
 }
 
 void Graph::PushInputData(const std::string& name, const ov::SoPtr<ITensor>& input) {
+    PROFILE(_prof, "Graph::PushInputData");
     if (!IsReady()) OPENVINO_THROW("Wrong state. Topology not ready.");
     auto input_itr = inputNodesMap.find(name);
     if (input_itr != inputNodesMap.end()) {
@@ -953,6 +955,7 @@ void Graph::PushInputData(const std::string& name, const ov::SoPtr<ITensor>& inp
 
 // suppose always being shared infer_request intel_cpu::Tensor to Graph if isDynamic.
 void Graph::PullOutputData(std::unordered_map<std::string, ov::SoPtr<ITensor>>& output) {
+    PROFILE(_prof, "Graph::PullOutputData");
     if (!IsReady())
         OPENVINO_THROW("Wrong state. Topology not ready.");
 
@@ -1033,6 +1036,7 @@ void Graph::PullOutputData(std::unordered_map<std::string, ov::SoPtr<ITensor>>& 
 
 void Graph::InferStatic(SyncInferRequest* request) {
     dnnl::stream stream(getEngine());
+    PROFILE(_prof0, std::string("Graph::InferStatic_#") + std::to_string(infer_count));
 
     for (const auto& node : executableGraphNodes) {
         VERBOSE(node, getConfig().debugCaps.verbose);
@@ -1040,6 +1044,7 @@ void Graph::InferStatic(SyncInferRequest* request) {
 
         if (request)
             request->throw_if_canceled();
+        PROFILE(_prof, node->getTypeStr(), node->getName());
         ExecuteNode(node, stream);
     }
 }
@@ -1242,6 +1247,7 @@ public:
 void Graph::InferDynamic(SyncInferRequest* request) {
     dnnl::stream stream(getEngine());
 
+    PROFILE(_prof0, std::string("Graph::InferDynamic_#") + std::to_string(infer_count));
     std::set<size_t> syncIndsWorkSet;
     for (const auto& nodeIndx : syncNodesInds) {
         syncIndsWorkSet.insert(nodeIndx.second);
@@ -1260,12 +1266,15 @@ void Graph::InferDynamic(SyncInferRequest* request) {
     size_t inferCounter = 0;
 
     for (auto stopIndx : syncIndsWorkSet) {
-        updateNodes->run(stopIndx);
+        {
+            PROFILE(_prof, "updateNodes");
+            updateNodes->run(stopIndx);
+        }
         for (; inferCounter < stopIndx; ++inferCounter) {
             auto& node = executableGraphNodes[inferCounter];
             VERBOSE(node, getConfig().debugCaps.verbose);
             PERF(node, getConfig().collectPerfCounters);
-
+            PROFILE(_prof, node->getTypeStr(), node->getName());
             if (request)
                 request->throw_if_canceled();
             ExecuteNode(node, stream);
@@ -1299,7 +1308,7 @@ void Graph::Infer(SyncInferRequest* request) {
         OPENVINO_THROW("Unknown ov::intel_cpu::Graph state: " , static_cast<size_t>(status));
     }
 
-    if (infer_count != -1) infer_count++;
+    infer_count++;
 }
 
 void Graph::SortTopologically() {
@@ -1810,7 +1819,7 @@ void Graph::resolveInPlaceDirection(const NodePtr& node) const {
                     return InplaceDirectionType::NONE;
                 };
                 auto result = searchNonCyclicDirection(node, inPlaceInpPort);
-                if (one_of(result, InplaceDirectionType::UP, InplaceDirectionType::NONE)) {
+                if (InplaceDirectionType::UP == result) {
                     auto config = node->getSelectedPrimitiveDescriptor()->getConfig();
                     config.inConfs[inpPort].inPlace(-1);
                     node->initDescriptor(config);
@@ -1818,6 +1827,58 @@ void Graph::resolveInPlaceDirection(const NodePtr& node) const {
                     auto config = node->getSelectedPrimitiveDescriptor()->getConfig();
                     config.outConfs[inPlaceInpPort].inPlace(-1);
                     node->initDescriptor(config);
+                } else if (InplaceDirectionType::NONE == result) {
+                    // resolve cyclic inplace to downstream instead of upstream for the node
+                    // when there is only one output referencing to the edges of it,
+                    // thus benefits zero-copy of outputs.
+                    int numConflicts = 0;
+
+                    // search descendants
+                    // note: there are only non-inplace or cyclic-inplace descendants at the moment.
+                    std::function<void(const NodePtr& node, int portIdx)> searchReferencingOutput;
+                    searchReferencingOutput = [&](const NodePtr& node, int portIdx) -> void {
+                        if (numConflicts > 1) return;  // early stop
+                        auto childEdges = node->getChildEdgesAtPort(portIdx);
+                        for (auto& edge : childEdges) {
+                            auto pChild = edge->getChild();
+                            if (Type::Output == pChild->getType()) {
+                                numConflicts++;
+                            } else {
+                                auto result = inPlaceDirection(pChild, PortType::INPUT, edge->getOutputNum());
+                                if (InplaceDirectionType::CYCLIC == result) {
+                                    return searchReferencingOutput(pChild, pChild->inPlaceInputPort(edge->getOutputNum()));
+                                }
+                            }
+                        }
+                    };
+                    searchReferencingOutput(node, inPlaceInpPort);
+
+                    // search siblings
+                    if (numConflicts <= 1) {
+                        // note: the parent node does not use inPlace memory at the moment, let's check the siblings
+                        for (auto& peerEdge : pParent->getChildEdgesAtPort(pEdge->getInputNum())) {
+                            auto peerNode = peerEdge->getChild();
+                            if (peerNode == node) continue;
+                            if (Type::Output == peerNode->getType()) {
+                                numConflicts++;
+                            } else {
+                                auto result = inPlaceDirection(peerNode, PortType::INPUT, peerEdge->getOutputNum());
+                                if (one_of(result, InplaceDirectionType::DOWN, InplaceDirectionType::CYCLIC)) {
+                                    numConflicts++;
+                                }
+                            }
+                        }
+                    }
+
+                    if (numConflicts == 1) { // downstream to make the only output edge be referenced.
+                        auto config = node->getSelectedPrimitiveDescriptor()->getConfig();
+                        config.outConfs[inPlaceInpPort].inPlace(-1);
+                        node->initDescriptor(config);
+                    } else { // the default direction of upstream
+                        auto config = node->getSelectedPrimitiveDescriptor()->getConfig();
+                        config.inConfs[inpPort].inPlace(-1);
+                        node->initDescriptor(config);
+                    }
                 } else {
                     OPENVINO_THROW("A node without an inPlace memory cyclic dependency has not been found");
                 }
