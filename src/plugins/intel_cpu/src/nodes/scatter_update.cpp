@@ -10,6 +10,11 @@
 #include "openvino/core/parallel.hpp"
 #include "openvino/opsets/opset3.hpp"
 #include "openvino/opsets/opset4.hpp"
+#include "openvino/opsets/opset12.hpp"
+#include "utils/plain_tensor.hpp"
+#include "common/tensor_advance.h"
+
+#include "../shape_inference/include/element_visitor.hpp"
 
 #include <algorithm>
 #include <string>
@@ -17,18 +22,25 @@
 
 using namespace dnnl;
 
+#ifdef NDEBUG
+#define ASSERT_DEBUG_ONLY(...)
+#else
+#define ASSERT_DEBUG_ONLY(...) OPENVINO_ASSERT(__VA_ARGS__)
+#endif
+
 namespace ov {
 namespace intel_cpu {
 namespace node {
 
 bool ScatterUpdate::isSupportedOperation(const std::shared_ptr<const ov::Node>& op, std::string& errorMessage) noexcept {
     try {
-        auto scatterElemUpd = ov::as_type_ptr<const ov::opset3::ScatterElementsUpdate>(op);
+        auto scatterElemUpd3 = ov::as_type_ptr<const ov::opset3::ScatterElementsUpdate>(op);
+        auto scatterElemUpd12 = ov::as_type_ptr<const ov::opset12::ScatterElementsUpdate>(op);
         auto scatterUpd = ov::as_type_ptr<const ov::opset3::ScatterUpdate>(op);
         auto scatterNdUpd = ov::as_type_ptr<const ov::opset4::ScatterNDUpdate>(op);
-        if (!scatterElemUpd && !scatterUpd && !scatterNdUpd) {
+        if (!scatterElemUpd3 && !scatterElemUpd12 && !scatterUpd && !scatterNdUpd) {
             const std::string opType = op->get_type_name();
-            errorMessage = "Only opset" + opType == "ScatterNDUpdate" ? "4 " : "3 " + opType + " operation is supported";
+            errorMessage = std::string("Type ") + opType + " is not supported.";
             return false;
         }
     } catch (...) {
@@ -52,6 +64,14 @@ ScatterUpdate::ScatterUpdate(const std::shared_ptr<ov::Node>& op, const GraphCon
         errorPrefix = std::string(op->get_type_name()) + " node with name '" + getName() + "'";
     } else {
         OPENVINO_THROW_NOT_IMPLEMENTED(errorMessage);
+    }
+
+    const auto node = std::dynamic_pointer_cast<const ov::op::v12::ScatterElementsUpdate>(op);
+    if (node) {
+        m_config.reduction_type = node->get_reduction();
+        m_config.use_init_val = node->get_use_init_val();
+    } else {
+        m_config.reduction_type = ov::op::v12::ScatterElementsUpdate::Reduction::NONE;
     }
 }
 
@@ -198,34 +218,15 @@ void ScatterUpdate::initSupportedPrimitiveDescriptors() {
     dataPrec = getOriginalInputPrecisionAtPort(DATA_ID);
     dataSize = dataPrec.size();
 
-    bool canBeInplace = !isDynamicNode() && getParentEdgeAt(DATA_ID)->getParent()->getChildEdges().size() == 1 &&
-                        !getParentEdgeAt(DATA_ID)->getParent()->isConstant();
+    bool canBeInplace = !getParentEdgeAt(DATA_ID)->getParent()->isConstant();
 
-    NodeConfig config;
-    if (axisRelaxed) {
-        config.inConfs.resize(4);
-    } else {
-        config.inConfs.resize(3);
-    }
-    config.outConfs.resize(1);
-    config.inConfs[DATA_ID].constant(false);
-    config.inConfs[INDICES_ID].constant(false);
-    config.inConfs[UPDATE_ID].constant(false);
-    config.outConfs[0].constant(false);
-    config.inConfs[DATA_ID].inPlace(canBeInplace ? 0 : -1);
-    config.inConfs[INDICES_ID].inPlace(-1);
-    config.inConfs[UPDATE_ID].inPlace(-1);
-    config.outConfs[0].inPlace(canBeInplace ? 0 : -1);
-    if (axisRelaxed) {
-        config.inConfs[AXIS_ID].constant(false);
-        config.inConfs[AXIS_ID].inPlace(-1);
-    }
-
-    std::vector<PortConfigurator> inPortConfig{{LayoutType::ncsp, dataPrec}, {LayoutType::ncsp, indicesPrec}, {LayoutType::ncsp, dataPrec}};
+    std::vector<PortConfigurator> inPortConfig{{LayoutType::ncsp, dataPrec, false, canBeInplace ? 0 : -1},
+                                                {LayoutType::ncsp, indicesPrec},
+                                                {LayoutType::ncsp, dataPrec}};
     if (axisRelaxed)
         inPortConfig.emplace_back(LayoutType::ncsp, axisPrec);
     addSupportedPrimDesc(inPortConfig,
-                         {{LayoutType::ncsp, dataPrec}},
+                         {{LayoutType::ncsp, dataPrec, false, canBeInplace ? 0 : -1}},
                           impl_desc_type::unknown);
 }
 
@@ -262,6 +263,332 @@ static std::vector<size_t> getBlockND(const VectorDims& shape) {
     }
     return blockND;
 }
+
+namespace scatter_elements_update {
+
+class ReduceMultiply {
+public:
+    template <typename DT>
+    void operator() (DT* dst_data, const DT* src_data) const {
+        *dst_data *= *src_data;
+    }
+};
+
+class ReduceAdd {
+public:
+    template <typename DT>
+    void operator() (DT* dst_data, const DT* src_data) const {
+        *dst_data += *src_data;
+    }
+};
+
+class ReduceMean {
+public:
+    template <typename DT>
+    void operator() (DT* dst_data, const DT* src_data) const {
+        *dst_data += *src_data;
+    }
+};
+
+class ReduceMaximum {
+public:
+    template <typename DT>
+    void operator() (DT* dst_data, const DT* src_data) const {
+        *dst_data = std::isnan(*src_data) ? *src_data : std::max(*dst_data, *src_data);
+    }
+};
+
+class ReduceMinimum {
+public:
+    template <typename DT>
+    void operator() (DT* dst_data, const DT* src_data) const {
+        *dst_data = std::isnan(*src_data) ? *src_data : std::min(*dst_data, *src_data);
+    }
+};
+
+class ReduceNone {
+public:
+    template <typename DT>
+    void operator() (DT* dst_data, const DT* src_data) const {
+        *dst_data = *src_data;
+    }
+};
+
+template <typename T>
+static T reduction_neutral_value(const Reduction reduction_type) {
+    switch (reduction_type) {
+    case Reduction::MAX:
+        return std::numeric_limits<T>::lowest();
+    case Reduction::MIN:
+        return std::numeric_limits<T>::max();
+    case Reduction::PROD:
+        return T{1};
+    case Reduction::SUM:
+    case Reduction::MEAN:
+    case Reduction::NONE:
+        return T{0};
+    default:
+        OPENVINO_THROW("Neutral value not available for this type of reduction");
+        return 0;
+    }
+}
+
+static ReduceMultiply reduce_multiply;
+static ReduceAdd reduce_add;
+static ReduceMean reduce_mean;
+static ReduceMaximum reduce_maximum;
+static ReduceMinimum reduce_minimum;
+static ReduceNone data_assign;
+
+static inline void getCoordinate(VectorDims& coordinate, size_t offset, const VectorDims& shape) {
+    size_t shapeRank = shape.size();
+    for (int i = shapeRank - 1; i >= 0; i--) {
+        coordinate[i] = offset % shape[i];
+        offset /= shape[i];
+    }
+}
+
+// output[indices[i][j][k]][j][k] = updates[i][j][k] if axis = 0,
+// output[i][indices[i][j][k]][k] = updates[i][j][k] if axis = 1,
+// output[i][j][indices[i][j][k]] = updates[i][j][k] if axis = 2.
+template <typename DataType, typename IndexType, typename func_t>
+void scatterElementsUpdate(const MemoryPtr& mem_data, const MemoryPtr& mem_indices, const MemoryPtr& mem_updates,
+                            int64_t axis, const ScatterUpdate::Config& config, func_t& kernel_func) {
+    std::array<PlainTensor, 3> arr_memptr = {PlainTensor(mem_data), PlainTensor(mem_indices), PlainTensor(mem_updates)};
+    const auto& data_shape = mem_data->getStaticDims();
+    const auto& indices_shape = mem_indices->getStaticDims();
+
+    int64_t updates_rank = static_cast<int64_t>(indices_shape.size());
+    if (axis < 0) axis += updates_rank;   // normalize
+
+    // We squash the workload along axis dimension becasue we should this dimension serially,
+    // due to data dependency brought by duplicated values in indices.
+    VectorDims squashed_indices_shape(indices_shape);
+    squashed_indices_shape[axis] = 1;
+
+    int64_t index_dim_size = indices_shape[axis];
+    int64_t data_dim_size = data_shape[axis];
+    int64_t data_dim_stride = arr_memptr[0].stride_bytes(axis);
+    int64_t indices_dim_stride = arr_memptr[1].stride_bytes(axis);
+    int64_t updates_dim_stride = arr_memptr[2].stride_bytes(axis);
+
+    const bool use_init_val = config.use_init_val;
+    const Reduction reduction_type = config.reduction_type;
+
+    auto scatter_elements_update_loop = [&](char** data, const size_t* strides, const size_t n) {
+        // When *use_init_val* attribute is false, we need to substitute the copied values at target locations with values that
+        // will not affect the particular reduction algorithms.
+        if (!use_init_val) {
+            const auto value = reduction_neutral_value<DataType>(reduction_type);
+            // For better performance, when axis is the last dimension, we iterate along axis in the inner loop; otherwise
+            // we iterate axis in the outer loop.
+            if (axis == updates_rank - 1) {
+                auto* data_in_bytes = data[0];
+                auto* indices_in_bytes = data[1];
+                for (size_t k = 0; k < n; k++) {
+                    for (int64_t i = 0; i < index_dim_size; i++) {
+                        IndexType idxValue = *((reinterpret_cast<IndexType*>(indices_in_bytes))+ i);
+                        if (idxValue < 0) idxValue += data_dim_size;
+                        ASSERT_DEBUG_ONLY(idxValue < data_dim_size && idxValue >= 0, "invalid index value.");
+                        *(reinterpret_cast<DataType*>(data_in_bytes + idxValue * data_dim_stride)) = value;
+                    }
+                    data_in_bytes += strides[0];
+                    indices_in_bytes += strides[1];
+                }
+            } else {
+                for (int64_t i = 0; i < index_dim_size; i++) {
+                    auto* data_in_bytes = data[0];
+                    auto* indices_in_bytes = (char*)(reinterpret_cast<IndexType*>(data[1] + i * indices_dim_stride));
+                    auto* updates_in_bytes = data[2];
+                    for (size_t k = 0; k < n; k++) {
+                        IndexType idxValue = *(reinterpret_cast<IndexType*>(indices_in_bytes));
+                        if (idxValue < 0) idxValue += data_dim_size;
+                        ASSERT_DEBUG_ONLY(idxValue < data_dim_size && idxValue >= 0, "invalid index value.");
+                        *(reinterpret_cast<DataType*>(data_in_bytes + idxValue * data_dim_stride)) = value;
+                        data_in_bytes += strides[0];
+                        indices_in_bytes += strides[1];
+                        updates_in_bytes += strides[2];
+                    }
+                }
+            }
+        }
+
+        // Apply the Reduce function in an element-wise fashion. For better performance,
+        // when axis is the last dimension, we iterate along axis in the inner loop; otherwise we iterate axis
+        // in the outer loop.
+        if (axis == updates_rank - 1) {
+            auto* data_in_bytes = data[0];
+            auto* indices_in_bytes = data[1];
+            auto* updates_in_bytes = data[2];
+            for (size_t k = 0; k < n; k++) {
+                for (int64_t i = 0; i < index_dim_size; i++) {
+                    IndexType idxValue = *((reinterpret_cast<IndexType*>(indices_in_bytes))+ i);
+                    if (idxValue < 0) idxValue += data_dim_size;
+                    ASSERT_DEBUG_ONLY(idxValue < data_dim_size && idxValue >= 0, "invalid index value.");
+                    kernel_func(reinterpret_cast<DataType*>(data_in_bytes + idxValue * data_dim_stride), reinterpret_cast<DataType*>(updates_in_bytes + i * updates_dim_stride));
+                }
+                data_in_bytes += strides[0];
+                indices_in_bytes += strides[1];
+                updates_in_bytes += strides[2];
+            }
+        } else {
+            for (int64_t i = 0; i < index_dim_size; i++) {
+                auto* data_in_bytes = data[0];
+                auto* indices_in_bytes = data[1] + i * indices_dim_stride;
+                auto* updates_in_bytes = data[2];
+                for (size_t k = 0; k < n; k++) {
+                    IndexType idxValue = *(reinterpret_cast<IndexType*>(indices_in_bytes));
+                    if (idxValue < 0) idxValue += data_dim_size;
+                    ASSERT_DEBUG_ONLY(idxValue < data_dim_size && idxValue >= 0, "invalid index value.");
+                    kernel_func(reinterpret_cast<DataType*>(data_in_bytes + idxValue * data_dim_stride), reinterpret_cast<DataType*>(updates_in_bytes + i * updates_dim_stride));
+                    data_in_bytes += strides[0];
+                    indices_in_bytes += strides[1];
+                    updates_in_bytes += strides[2];
+                }
+            }
+        }
+    };  // loop
+
+    size_t num_workloads = shape_size(squashed_indices_shape);
+    int num_threads = std::min(parallel_get_max_threads(), static_cast<int>(num_workloads));
+    TensorAdvance<3> tensorItr(squashed_indices_shape, arr_memptr);
+    parallel_nt(num_threads, [&](const int ithr, const int nthr) {
+        size_t start = 0, end = 0;
+        splitter(num_workloads, nthr, ithr, start, end);        
+        tensorItr.run(scatter_elements_update_loop, start, end);
+    });
+}
+
+template <typename DataType, typename IndexType>
+void scatterElementsUpdate(const MemoryPtr& mem_data, const MemoryPtr& mem_indices, const MemoryPtr& mem_updates,
+                            int axis, const ScatterUpdate::Config& config, ReduceMean& kernel_func) {
+    PlainTensor data_buf, indices_buf, updates_buf;
+    data_buf.reset(mem_data);
+    indices_buf.reset(mem_indices);
+    updates_buf.reset(mem_updates);
+
+    const auto& data_shape = mem_data->getStaticDims();
+    const auto& indices_shape = mem_indices->getStaticDims();
+    size_t updates_rank = indices_shape.size();
+
+    const int64_t data_dim_size = static_cast<int64_t>(data_shape[axis]);
+    const auto index_dim_size = indices_shape[axis];
+
+    const bool use_init_val = config.use_init_val;
+    const Reduction reduction_type = config.reduction_type;
+
+    if (axis < 0)
+        axis += updates_rank;
+
+    VectorDims squashed_indices_shape(indices_shape);
+    squashed_indices_shape[axis] = 1;
+
+    // process serially along 'axis' dimension because of data dependency brought by duplicated value in indices
+    parallel_nt(0, [&](const int ithr, const int nthr) {
+        size_t start = 0, end = 0;
+        splitter(shape_size(squashed_indices_shape), nthr, ithr, start, end);
+
+        if (!use_init_val) {
+            const auto value = reduction_neutral_value<DataType>(reduction_type);
+            for (size_t worker = start; worker < end; worker++) {
+                VectorDims indices_coord(updates_rank, 0);
+                getCoordinate(indices_coord, worker, squashed_indices_shape);
+                std::vector<size_t> data_coord(indices_coord);
+
+                for (size_t i = 0; i < index_dim_size; i++) {
+                    indices_coord[axis] = i;
+                    IndexType idxValue = indices_buf.at<IndexType, size_t>(indices_coord);
+                    if (idxValue < 0) idxValue += data_dim_size;
+                    ASSERT_DEBUG_ONLY(idxValue < data_dim_size && idxValue >= 0, "invalid index value.");
+                    data_coord[axis] = idxValue;
+                    data_buf.at<DataType, size_t>(data_coord) = value;
+                }
+            }
+        }
+
+        for (size_t worker = start; worker < end; worker++) {
+            VectorDims indices_coord(updates_rank, 0);
+            getCoordinate(indices_coord, worker, squashed_indices_shape);
+            std::vector<size_t> data_coord(indices_coord);
+
+            std::unordered_map<size_t, int64_t> mean_reduction_counters;
+
+            // inner axis loop for better performance
+            for (size_t i = 0; i < index_dim_size; i++) {
+                indices_coord[axis] = i;
+                IndexType idxValue = indices_buf.at<IndexType, size_t>(indices_coord);
+                if (idxValue < 0) idxValue += data_dim_size;
+                ASSERT_DEBUG_ONLY(idxValue < data_dim_size && idxValue >= 0, "invalid index value.");
+                data_coord[axis] = idxValue;
+                DataType& dst = data_buf.at<DataType, size_t>(data_coord);
+                DataType src = updates_buf.at<DataType, size_t>(indices_coord);
+
+                kernel_func(std::addressof(dst), &src);
+
+                mean_reduction_counters[idxValue] += 1;
+            }
+
+            for (const auto& counter : mean_reduction_counters) {
+                data_coord[axis] = counter.first;
+                DataType& dst = data_buf.at<DataType, size_t>(data_coord);
+                const auto N = counter.second + static_cast<int32_t>(use_init_val);
+                dst = static_cast<DataType>(static_cast<double>(dst) / N);
+            }
+        }
+    });
+}
+
+struct Caller : public element::NoAction<bool> {
+    using element::NoAction<bool>::visit;
+
+    template <element::Type_t DATA_ET, class DT = fundamental_type_for<DATA_ET>>
+    static result_type visit(ov::element::Type& indicesPrec, const MemoryPtr& dstMemPtr, const MemoryPtr& indicesMemPtr, const MemoryPtr& updateMemPtr,
+                            int axis, const ScatterUpdate::Config& config) {
+        using namespace ov::element;
+        return IF_TYPE_OF(scatter_el_update_idx_type,
+                          OV_PP_ET_LIST(i32),
+                          EvaluateByIndicesType,
+                          indicesPrec,
+                          dstMemPtr, indicesMemPtr, updateMemPtr, axis, config, (DT*)0ul);
+    }
+
+private:
+    struct EvaluateByIndicesType : public element::NoAction<bool> {
+        using element::NoAction<bool>::visit;
+
+        template <element::Type_t INDEX_ET, class DT, class IT = fundamental_type_for<INDEX_ET>>
+        static result_type visit(const MemoryPtr& dstMemPtr, const MemoryPtr& indicesMemPtr, const MemoryPtr& updateMemPtr,
+                                int axis, const ScatterUpdate::Config& config, DT* dummy) {
+            switch (config.reduction_type) {
+            case Reduction::NONE :
+                scatterElementsUpdate<DT, IT>(dstMemPtr, indicesMemPtr, updateMemPtr, axis, config, data_assign);
+                break;
+            case Reduction::SUM :
+                scatterElementsUpdate<DT, IT>(dstMemPtr, indicesMemPtr, updateMemPtr, axis, config, reduce_add);
+                break;
+            case Reduction::MAX :
+                scatterElementsUpdate<DT, IT>(dstMemPtr, indicesMemPtr, updateMemPtr, axis, config, reduce_maximum);
+                break;
+            case Reduction::MIN :
+                scatterElementsUpdate<DT, IT>(dstMemPtr, indicesMemPtr, updateMemPtr, axis, config, reduce_minimum);
+                break;
+            case Reduction::PROD:
+                scatterElementsUpdate<DT, IT>(dstMemPtr, indicesMemPtr, updateMemPtr, axis, config, reduce_multiply);
+                break;
+            case Reduction::MEAN :
+                scatterElementsUpdate<DT, IT>(dstMemPtr, indicesMemPtr, updateMemPtr, axis, config, reduce_mean);
+                break;
+            default :
+                OPENVINO_THROW("unsupported reduce");
+                break;
+            }
+            return true;
+        }
+    };
+};
+
+};  // namespace scatter_elements_update
+
 
 void ScatterUpdate::execute(dnnl::stream strm) {
     auto srcMemPtr = getSrcMemoryAtPort(DATA_ID);
@@ -391,12 +718,16 @@ void ScatterUpdate::execute(dnnl::stream strm) {
             break;
         }
         case ScatterUpdateMode::ScatterElementsUpdate: {
-            scatterElementsUpdate(indicesPtr, updatePtr, axis, dstPtr);
+            using namespace ov::element;
+            IF_TYPE_OF(scatter_el_update_data_type,
+                OV_PP_ET_LIST(f32, bf16, f16, i32),
+                scatter_elements_update::Caller,
+                dataPrec, indicesPrec,
+                dstMemPtr, indicesMemPtr, updateMemPtr, axis, this->m_config);
             break;
         }
         default: {
-            OPENVINO_THROW(errorPrefix
-           , " is not supported");
+            OPENVINO_THROW(errorPrefix, " is not supported");
         }
     }
 }
@@ -468,58 +799,6 @@ void ScatterUpdate::scatterNDUpdate(uint8_t *indices, uint8_t *update, uint8_t *
     });
 }
 
-// output[indices[i][j][k]][j][k] = updates[i][j][k] if axis = 0,
-// output[i][indices[i][j][k]][k] = updates[i][j][k] if axis = 1,
-// output[i][j][indices[i][j][k]] = updates[i][j][k] if axis = 2.
-void ScatterUpdate::scatterElementsUpdate(uint8_t *indices, uint8_t *update, int axis, uint8_t *dstData) {
-    const auto& srcDataDim = getParentEdgeAt(DATA_ID)->getMemory().getStaticDims();
-    const auto& updateDim = getParentEdgeAt(UPDATE_ID)->getMemory().getStaticDims();
-    size_t updateRank = updateDim.size();
-
-    std::vector<size_t> srcBlockND = getBlockND(srcDataDim);
-    std::vector<size_t> updateBlockND = getBlockND(updateDim);
-
-    parallel_nt(0, [&](const int ithr, const int nthr) {
-        int j;
-        size_t i, dst_idx = 0, start = 0, end = 0;
-        VectorDims tensorItr(updateRank, 0);
-        splitter(updateBlockND[0], nthr, ithr, start, end);
-        for (j = updateRank - 1, i = start; j >= 0; j--) {
-            tensorItr[j] = i % updateDim[j];
-            i /= updateDim[j];
-        }
-
-        for (i = 0; i < static_cast<size_t>(axis); ++i)
-            dst_idx += tensorItr[i] * srcBlockND[i + 1];
-        for (i++; i < updateRank; ++i)
-            dst_idx += tensorItr[i] * srcBlockND[i + 1];
-
-        for (size_t iwork = start; iwork < end; iwork++) {
-            int64_t idxValue = getIndicesValue(indices, iwork);
-            int64_t axisDim = static_cast<int64_t>(srcDataDim[axis]);
-            if (idxValue < 0)
-                idxValue += axisDim;
-            if (0 <= idxValue && idxValue < axisDim)
-                cpu_memcpy(dstData + dataSize * (dst_idx + idxValue * srcBlockND[axis + 1]),
-                            update + iwork * dataSize, dataSize);
-
-            for (j = updateRank - 1; j >= 0; j--) {
-                tensorItr[j]++;
-                if (tensorItr[j] < updateDim[j]) {
-                    if (j != axis)
-                        dst_idx += srcBlockND[j + 1];
-                    break;
-                } else {
-                    tensorItr[j] = 0;
-                    for (dst_idx = 0, i = 0; i < static_cast<size_t>(axis); ++i)
-                        dst_idx += tensorItr[i] * srcBlockND[i + 1];
-                    for (i++; i < updateRank; ++i)
-                        dst_idx += tensorItr[i] * srcBlockND[i + 1];
-                }
-            }
-        }
-    });
-}
 
 bool ScatterUpdate::created() const {
     return getType() == Type::ScatterUpdate
