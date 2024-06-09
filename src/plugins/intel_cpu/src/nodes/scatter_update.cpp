@@ -12,12 +12,16 @@
 #include "openvino/opsets/opset4.hpp"
 #include "openvino/opsets/opset12.hpp"
 #include "selective_build.h"
+#include "common/tensor_advance.h"
 
 #include <algorithm>
 #include <string>
 #include <vector>
 
+#include "kernels/seu_imp.hpp"
+
 using namespace dnnl;
+using namespace ov::Extensions::Cpu::XARCH;
 
 namespace ov {
 namespace intel_cpu {
@@ -261,7 +265,7 @@ static std::vector<size_t> getBlockND(const VectorDims& shape) {
     return blockND;
 }
 
-namespace scatter_elements_update {
+namespace {
 template <typename T>
 static T reduction_neutral_value(const ScatterUpdate::Reduction reduction_type) {
     switch (reduction_type) {
@@ -348,13 +352,23 @@ struct ScatterElementsUpdateContext {
 };
 
 // tier 2 dispatcher with Reduce which follows up DataType.
-template<typename PT>
+template<typename KernelType>
 struct ScatterElementsUpdateReduceDispatcher {
     void operator()(ScatterElementsUpdateContext& ctx) {
-        using kernel_t = typename PT::second_type;
-        using data_t = typename PT::first_type;
-        ctx.node->scatterElementsUpdate<data_t>(ctx.dstMemPtr, ctx.indicesMemPtr, ctx.updateMemPtr, ctx.axis,
-                                                kernel_t{});
+        const char* penv = getenv("USE_SEU_ADVANCE");
+        if (penv && std::atoi(penv) > 0) {
+            std::cout << "=========== USE_SEU_ADVANCE=1\n";
+            ctx.node->scatterElementsUpdateAdvance(ctx.dstMemPtr, ctx.indicesMemPtr, ctx.updateMemPtr, ctx.axis, KernelType{});
+        } else {
+            std::cout << "=========== USE_SEU_ADVANCE=0\n";
+            ctx.node->scatterElementsUpdate(ctx.dstMemPtr, ctx.indicesMemPtr, ctx.updateMemPtr, ctx.axis, KernelType{});
+        }
+
+        const char* penv2 = getenv("USE_SEU_1D");
+        if (penv2 && std::atoi(penv2) > 0) {
+            std::cout << "=========== USE_SEU_1D=1\n";
+            ctx.node->scatterElementsUpdate1D(ctx.dstMemPtr, ctx.indicesMemPtr, ctx.updateMemPtr, ctx.axis, KernelType{});
+        }
     }
 };
 
@@ -367,13 +381,12 @@ struct ScatterElementsUpdateDispatcher {
 
 private:
     void scatterElementsUpdate_dispatch(ScatterElementsUpdateContext& ctx) {
-        using namespace scatter_elements_update;
-        using DT_NONE = std::pair<DataType, ReduceNone>;
-        using DT_SUM = std::pair<DataType, ReduceAdd>;
-        using DT_MAX = std::pair<DataType, ReduceMaximum>;
-        using DT_MIN = std::pair<DataType, ReduceMinimum>;
-        using DT_MUL = std::pair<DataType, ReduceMultiply>;
-        using DT_MEAN = std::pair<DataType, ReduceMean>;
+        using DT_NONE = ScatterUpdate::ReduceNone<DataType>;
+        using DT_SUM = ScatterUpdate::ReduceAdd<DataType>;
+        using DT_MAX = ScatterUpdate::ReduceMaximum<DataType>;
+        using DT_MIN = ScatterUpdate::ReduceMinimum<DataType>;
+        using DT_MUL = ScatterUpdate::ReduceMultiply<DataType>;
+        using DT_MEAN = ScatterUpdate::ReduceMean<DataType>;
         OV_SWITCH(intel_cpu,
                 ScatterElementsUpdateReduceDispatcher,
                 ctx,
@@ -386,15 +399,234 @@ private:
                 OV_CASE(ScatterUpdate::Reduction::MEAN, DT_MEAN));
     }
 };
-};   // namespace scatter_elements_update
+}; // namespace
 
 // output[indices[i][j][k]][j][k] = updates[i][j][k] if axis = 0,
 // output[i][indices[i][j][k]][k] = updates[i][j][k] if axis = 1,
 // output[i][j][indices[i][j][k]] = updates[i][j][k] if axis = 2.
-template <typename DataType, typename KernelType>
-void ScatterUpdate::scatterElementsUpdate(const MemoryPtr& mem_data, const MemoryPtr& mem_indices, const MemoryPtr& mem_updates,
-                            int axis, const KernelType& kernel) {
-    using namespace scatter_elements_update;
+template <template<class> class KernelType, class DataType>
+void ScatterUpdate::scatterElementsUpdate1D(const MemoryPtr& mem_data,
+                                            const MemoryPtr& mem_indices,
+                                            const MemoryPtr& mem_updates,
+                                            int axis,
+                                            const KernelType<DataType>& kernel) {
+    std::array<PlainTensor, 2> arr_memptr = {PlainTensor(mem_data), PlainTensor(mem_updates)};
+    uint8_t *indices_in_bytes = mem_indices->getDataAs<uint8_t>();
+    const auto& data_shape = mem_data->getStaticDims();
+    const auto& indices_shape = mem_indices->getStaticDims();  // 1D
+    const auto& updates_shape = mem_updates->getStaticDims();
+
+    OPENVINO_ASSERT(indices_shape.size() == 1, "invalid indices shape!");
+
+    int64_t updates_rank = static_cast<int64_t>(updates_shape.size());
+    if (axis < 0) axis += updates_rank;   // normalize
+
+    // We squash the workload along axis dimension because we should process along this dimension serially,
+    // due to data dependency brought by duplicated values in indices.
+    VectorDims squashed_updates_shape(updates_shape);
+    squashed_updates_shape[axis] = 1;
+
+    int64_t index_dim_size = shape_size(indices_shape);
+    int64_t data_dim_size = data_shape[axis];
+    int64_t data_dim_stride = arr_memptr[0].stride_bytes(axis);
+    // int64_t indices_dim_stride = PlainTensor(mem_indices).stride_bytes(0);
+    int64_t updates_dim_stride = arr_memptr[1].stride_bytes(axis);
+
+    OPENVINO_ASSERT(index_dim_size == static_cast<int64_t>(updates_shape[axis]), "invalid shapes of inputs!");
+
+    auto scatter_elements_update_loop = [&](char** data, const size_t* strides, const size_t n) {
+        // When *use_init_val* attribute is false, we need to substitute the copied values at target locations with values that
+        // will not affect the particular reduction algorithms.
+        if (!use_init_val) {
+            const auto value = reduction_neutral_value<DataType>(reduction_type);
+            // For better performance, when axis is the last dimension, we iterate along axis in the inner loop; otherwise
+            // we iterate axis in the outer loop.
+            if (axis == updates_rank - 1) {
+                auto* data_in_bytes = data[0];
+                for (size_t k = 0; k < n; k++) {
+                    for (int64_t i = 0; i < index_dim_size; i++) {
+                        int64_t idxValue =  getIndicesValue(indices_in_bytes, i);
+                        if (idxValue < 0) idxValue += data_dim_size;
+                        assert(idxValue < data_dim_size && idxValue >= 0);
+                        *(reinterpret_cast<DataType*>(data_in_bytes + idxValue * data_dim_stride)) = value;
+                    }
+                    data_in_bytes += strides[0];
+                }
+            } else {
+                for (int64_t i = 0; i < index_dim_size; i++) {
+                    auto* data_in_bytes = data[0];
+                    int64_t idxValue =  getIndicesValue(indices_in_bytes, i);
+                    if (idxValue < 0) idxValue += data_dim_size;
+                    assert(idxValue < data_dim_size && idxValue >= 0);
+                    for (size_t k = 0; k < n; k++) {
+                        *(reinterpret_cast<DataType*>(data_in_bytes + idxValue * data_dim_stride)) = value;
+                        data_in_bytes += strides[0];
+                    }
+                }
+            }
+        }
+
+        // Apply the Reduce function in an element-wise fashion. For better performance,
+        // when axis is the last dimension, we iterate along axis in the inner loop; otherwise we iterate axis
+        // in the outer loop.
+        if (axis == updates_rank - 1) {
+            auto* data_in_bytes = data[0];
+            auto* updates_in_bytes = data[1];
+            for (size_t k = 0; k < n; k++) {
+                for (int64_t i = 0; i < index_dim_size; i++) {
+                    int64_t idxValue =  getIndicesValue(indices_in_bytes, i);
+                    if (idxValue < 0) idxValue += data_dim_size;
+                    assert(idxValue < data_dim_size && idxValue >= 0);
+                    kernel(reinterpret_cast<DataType*>(data_in_bytes + idxValue * data_dim_stride), reinterpret_cast<DataType*>(updates_in_bytes + i * updates_dim_stride));
+                }
+                data_in_bytes += strides[0];
+                updates_in_bytes += strides[1];
+            }
+        } else {
+            for (int64_t i = 0; i < index_dim_size; i++) {
+                int64_t idxValue =  getIndicesValue(indices_in_bytes, i);
+                if (idxValue < 0) idxValue += data_dim_size;
+                assert(idxValue < data_dim_size && idxValue >= 0);
+                auto* data_in_bytes = data[0];
+                auto* updates_in_bytes = data[1];
+                data_in_bytes += idxValue * data_dim_stride;
+                updates_in_bytes += i * updates_dim_stride;
+#define HAVE_INTRISIC_PATH 1
+#if defined(HAVE_INTRISIC_PATH)
+                reduce_add(data_in_bytes, strides[0], const_cast<char*>(updates_in_bytes), strides[1], n);
+#else
+                for (size_t k = 0; k < n; k++) {
+                    kernel(reinterpret_cast<DataType*>(data_in_bytes), reinterpret_cast<DataType*>(updates_in_bytes));
+                    data_in_bytes += strides[0];
+                    updates_in_bytes += strides[1];
+                }
+#endif
+            }
+        }
+    };  // loop
+
+    size_t num_workloads = shape_size(squashed_updates_shape);
+    int num_threads = std::min(parallel_get_max_threads(), static_cast<int>(num_workloads));
+    TensorAdvance<2> tensorItr(squashed_updates_shape, arr_memptr);
+    parallel_nt(num_threads, [&](const int ithr, const int nthr) {
+        size_t start = 0, end = 0;
+        splitter(num_workloads, nthr, ithr, start, end);
+        tensorItr.run(scatter_elements_update_loop, start, end);
+    });
+}
+
+template <template<class> class KernelType, class DataType>
+void ScatterUpdate::scatterElementsUpdateAdvance(const MemoryPtr& mem_data,
+                                                 const MemoryPtr& mem_indices,
+                                                 const MemoryPtr& mem_updates,
+                                                 int axis,
+                                                 const KernelType<DataType>& kernel) {
+    std::array<PlainTensor, 3> arr_memptr = {PlainTensor(mem_data), PlainTensor(mem_indices), PlainTensor(mem_updates)};
+    const auto& data_shape = mem_data->getStaticDims();
+    const auto& indices_shape = mem_indices->getStaticDims();
+
+    int64_t updates_rank = static_cast<int64_t>(indices_shape.size());
+    if (axis < 0) axis += updates_rank;   // normalize
+
+    // We squash the workload along axis dimension because we should process along this dimension serially,
+    // due to data dependency brought by duplicated values in indices.
+    VectorDims squashed_indices_shape(indices_shape);
+    squashed_indices_shape[axis] = 1;
+
+    int64_t index_dim_size = indices_shape[axis];
+    int64_t data_dim_size = data_shape[axis];
+    int64_t data_dim_stride = arr_memptr[0].stride_bytes(axis);
+    int64_t indices_dim_stride = arr_memptr[1].stride_bytes(axis);
+    int64_t updates_dim_stride = arr_memptr[2].stride_bytes(axis);
+
+    auto scatter_elements_update_loop = [&](char** data, const size_t* strides, const size_t n) {
+        // When *use_init_val* attribute is false, we need to substitute the copied values at target locations with values that
+        // will not affect the particular reduction algorithms.
+        if (!use_init_val) {
+            const auto value = reduction_neutral_value<DataType>(reduction_type);
+            // For better performance, when axis is the last dimension, we iterate along axis in the inner loop; otherwise
+            // we iterate axis in the outer loop.
+            if (axis == updates_rank - 1) {
+                auto* data_in_bytes = data[0];
+                auto* indices_in_bytes = data[1];
+                for (size_t k = 0; k < n; k++) {
+                    for (int64_t i = 0; i < index_dim_size; i++) {
+                        int64_t idxValue =  getIndicesValue(reinterpret_cast<uint8_t*>(indices_in_bytes), i);
+                        if (idxValue < 0) idxValue += data_dim_size;
+                        assert(idxValue < data_dim_size && idxValue >= 0);
+                        *(reinterpret_cast<DataType*>(data_in_bytes + idxValue * data_dim_stride)) = value;
+                    }
+                    data_in_bytes += strides[0];
+                    indices_in_bytes += strides[1];
+                }
+            } else {
+                for (int64_t i = 0; i < index_dim_size; i++) {
+                    auto* data_in_bytes = data[0];
+                    auto* indices_in_bytes = data[1] + i * indices_dim_stride;
+                    for (size_t k = 0; k < n; k++) {
+                        int64_t idxValue =  getIndicesValue(reinterpret_cast<uint8_t*>(indices_in_bytes), 0);
+                        if (idxValue < 0) idxValue += data_dim_size;
+                        assert(idxValue < data_dim_size && idxValue >= 0);
+                        *(reinterpret_cast<DataType*>(data_in_bytes + idxValue * data_dim_stride)) = value;
+                        data_in_bytes += strides[0];
+                        indices_in_bytes += strides[1];
+                    }
+                }
+            }
+        }
+
+        // Apply the Reduce function in an element-wise fashion. For better performance,
+        // when axis is the last dimension, we iterate along axis in the inner loop; otherwise we iterate axis
+        // in the outer loop.
+        if (axis == updates_rank - 1) {
+            auto* data_in_bytes = data[0];
+            auto* indices_in_bytes = data[1];
+            auto* updates_in_bytes = data[2];
+            for (size_t k = 0; k < n; k++) {
+                for (int64_t i = 0; i < index_dim_size; i++) {
+                    int64_t idxValue =  getIndicesValue(reinterpret_cast<uint8_t*>(indices_in_bytes), i);
+                    if (idxValue < 0) idxValue += data_dim_size;
+                    assert(idxValue < data_dim_size && idxValue >= 0);
+                    kernel(reinterpret_cast<DataType*>(data_in_bytes + idxValue * data_dim_stride), reinterpret_cast<DataType*>(updates_in_bytes + i * updates_dim_stride));
+                }
+                data_in_bytes += strides[0];
+                indices_in_bytes += strides[1];
+                updates_in_bytes += strides[2];
+            }
+        } else {
+            for (int64_t i = 0; i < index_dim_size; i++) {
+                auto* data_in_bytes = data[0];
+                auto* indices_in_bytes = data[1] + i * indices_dim_stride;
+                auto* updates_in_bytes = data[2];
+                for (size_t k = 0; k < n; k++) {
+                    int64_t idxValue =  getIndicesValue(reinterpret_cast<uint8_t*>(indices_in_bytes), 0);
+                    if (idxValue < 0) idxValue += data_dim_size;
+                    assert(idxValue < data_dim_size && idxValue >= 0);
+                    kernel(reinterpret_cast<DataType*>(data_in_bytes + idxValue * data_dim_stride), reinterpret_cast<DataType*>(updates_in_bytes + i * updates_dim_stride));
+                    data_in_bytes += strides[0];
+                    indices_in_bytes += strides[1];
+                    updates_in_bytes += strides[2];
+                }
+            }
+        }
+    };  // loop
+
+    size_t num_workloads = shape_size(squashed_indices_shape);
+    int num_threads = std::min(parallel_get_max_threads(), static_cast<int>(num_workloads));
+    TensorAdvance<3> tensorItr(squashed_indices_shape, arr_memptr);
+    parallel_nt(num_threads, [&](const int ithr, const int nthr) {
+        size_t start = 0, end = 0;
+        splitter(num_workloads, nthr, ithr, start, end);        
+        tensorItr.run(scatter_elements_update_loop, start, end);
+    });
+}
+
+template <template<class> class KernelType, class DataType>
+void ScatterUpdate::scatterElementsUpdate(const MemoryPtr& mem_data,
+                                          const MemoryPtr& mem_indices,
+                                          const MemoryPtr& mem_updates,
+                                          int axis,
+                                          const KernelType<DataType>& kernel) {
     DataType *dataPtr = mem_data->getDataAs<DataType>();
     DataType *updatePtr = mem_updates->getDataAs<DataType>();
     uint8_t *indicesPtr = mem_indices->getDataAs<uint8_t>();
@@ -422,7 +654,7 @@ void ScatterUpdate::scatterElementsUpdate(const MemoryPtr& mem_data, const Memor
     parallel_nt(0, [&](const int ithr, const int nthr) {
         size_t start = 0, end = 0;
         splitter(shape_size(squashed_indices_shape), nthr, ithr, start, end);
-        scatter_elements_update::TensorIterator tensorItr(squashed_indices_shape, axis);
+        TensorIterator tensorItr(squashed_indices_shape, axis);
 
         // When *use_init_val* attribute is false, we need to substitute the copied values at target locations with values that
         // will not affect the particular reduction algorithms.
@@ -505,9 +737,11 @@ void ScatterUpdate::scatterElementsUpdate(const MemoryPtr& mem_data, const Memor
 // We specialize ReduceMean to avoid spoil performance of other reduce methods, as otherwise condition branch
 // were used in loops.
 template <typename DataType>
-void ScatterUpdate::scatterElementsUpdate(const MemoryPtr& mem_data, const MemoryPtr& mem_indices, const MemoryPtr& mem_updates,
-                                          int axis, const scatter_elements_update::ReduceMean& kernel) {
-    using namespace scatter_elements_update;
+void ScatterUpdate::scatterElementsUpdate(const MemoryPtr& mem_data,
+                                          const MemoryPtr& mem_indices,
+                                          const MemoryPtr& mem_updates,
+                                          int axis,
+                                          const ReduceMean<DataType>& kernel) {
     OPENVINO_ASSERT(reduction_type == ScatterUpdate::Reduction::MEAN, "The reduction type should be MEAN here.");
     DataType *dataPtr = mem_data->getDataAs<DataType>();
     DataType *updatePtr = mem_updates->getDataAs<DataType>();
@@ -536,7 +770,7 @@ void ScatterUpdate::scatterElementsUpdate(const MemoryPtr& mem_data, const Memor
     parallel_nt(0, [&](const int ithr, const int nthr) {
         size_t start = 0, end = 0;
         splitter(shape_size(squashed_indices_shape), nthr, ithr, start, end);
-        scatter_elements_update::TensorIterator tensorItr(squashed_indices_shape, axis);
+        TensorIterator tensorItr(squashed_indices_shape, axis);
 
         // When *use_init_val* attribute is false, we need to substitute the copied values at target locations with values that
         // will not affect the particular reduction algorithms.
@@ -641,7 +875,6 @@ void ScatterUpdate::scatterElementsUpdate(const MemoryPtr& mem_data, const Memor
 }
 
 void ScatterUpdate::scatterElementsUpdate(const MemoryPtr& dstMemPtr, const MemoryPtr& indicesMemPtr, const MemoryPtr& updateMemPtr, int axis) {
-    using namespace scatter_elements_update;
     ScatterElementsUpdateContext ctx{this, dstMemPtr, indicesMemPtr, updateMemPtr, axis, reduction_type};
     OV_SWITCH(intel_cpu,
               ScatterElementsUpdateDispatcher,
