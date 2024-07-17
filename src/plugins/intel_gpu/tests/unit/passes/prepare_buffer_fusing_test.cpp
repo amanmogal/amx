@@ -835,7 +835,6 @@ TEST(prepare_buffer_fusing, in_place_crop_dynamic_reshape_unsqueeze) {
     );
 
     auto config = get_test_default_config(engine);
-    config.set_property(ov::intel_gpu::allow_new_shape_infer(true));
     config.set_property(ov::intel_gpu::optimize_data(true));
     network network(engine, topology, config);
 
@@ -905,7 +904,6 @@ TEST(prepare_buffer_fusing, in_place_crop_dynamic_reshape_squeeze_crop_axis) {
     );
 
     auto config = get_test_default_config(engine);
-    config.set_property(ov::intel_gpu::allow_new_shape_infer(true));
     config.set_property(ov::intel_gpu::optimize_data(true));
     network network(engine, topology, config);
 
@@ -987,7 +985,6 @@ TEST(prepare_buffer_fusing, in_place_crop_dynamic_split_lengths) {
     );
 
     auto config = get_test_default_config(engine);
-    config.set_property(ov::intel_gpu::allow_new_shape_infer(true));
     config.set_property(ov::intel_gpu::optimize_data(true));
     network network(engine, topology, config);
 
@@ -1069,7 +1066,6 @@ TEST(prepare_buffer_fusing, in_place_crop_dynamic_mvn) {
     );
 
     auto config = get_test_default_config(engine);
-    config.set_property(ov::intel_gpu::allow_new_shape_infer(true));
     config.set_property(ov::intel_gpu::optimize_data(true));
     network network(engine, topology, config);
 
