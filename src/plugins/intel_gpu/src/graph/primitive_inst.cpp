@@ -20,6 +20,7 @@
 #include "eltwise_inst.h"
 #include "loop_inst.h"
 #include "deconvolution_inst.h"
+#include "sync_tensor_inst.h"
 #include "shape_of_inst.h"
 #include "softmax_inst.h"
 #include "strided_slice_inst.h"
@@ -277,14 +278,24 @@ void primitive_inst::update_shape() {
         return;
     }
     bool input_shape_changed = false;
+    // update weight shape for impl params
+    if (_node->is_type<fully_connected>()) {
+        const auto weights_idx = _node->get_primitive()->input.size();
+        const auto original_weights_memory = dep_memory_ptr(weights_idx);
+        if (_impl_params->input_layouts[1] != original_weights_memory->get_layout())
+            _impl_params->input_layouts[1] = original_weights_memory->get_layout();
+        GPU_DEBUG_TRACE_DETAIL << id() << ": update weight shape to "
+                               <<  _impl_params->input_layouts[1].to_short_string() << std::endl;
+    }
+
     for (size_t i = 0; i < _deps.size(); i++) {
         auto idx = _deps[i].second;
-        auto new_shape = _deps[i].first->_impl_params->get_output_layout(idx);
-        if (_impl_params->get_input_layout(i) != new_shape) {
+        auto new_layout = _deps[i].first->_impl_params->get_output_layout(idx);
+        if (_impl_params->get_input_layout(i) != new_layout) {
             GPU_DEBUG_TRACE_DETAIL << id() << ": update shape dep [" << i << "] : " << _deps[i].first->id()
                                    << " was: " << _impl_params->get_input_layout(i).to_short_string()
-                                   << " now: " << new_shape.to_short_string() << std::endl;
-            _impl_params->input_layouts[i] = new_shape;
+                                   << " now: " << new_layout.to_short_string() << std::endl;
+            _impl_params->input_layouts[i] = new_layout;
             input_shape_changed = true;
         }
     }
@@ -381,6 +392,22 @@ void primitive_inst::update_shape() {
     std::vector<event::ptr> dependencies_events;
     auto queue_type = get_network().get_stream().get_queue_type();
     bool has_runtime_deps = false;
+
+    auto print_arr = [&](std::vector<size_t> vec, size_t max_len) {
+        std::stringstream ss;
+        for (size_t i = 0; i < std::min(max_len, vec.size()); i++) {
+            ss << vec[i] << ", ";
+        }
+        GPU_DEBUG_TRACE_DETAIL << "Array shape_infer_deps (len=" << vec.size() << ") content: " << ss.str() << "\n";
+    };
+
+
+    if (get_node().is_type<paged_attention>()) {
+        auto shape_infer_deps = _node->get_shape_infer_dependencies();
+        print_arr(shape_infer_deps, shape_infer_deps.size());
+    }
+
+
     for (auto& i : _node->get_shape_infer_dependencies()) {
         // Some primitives may have flexible count of deps (e.g. reshape), thus allow skipping some deps
         if (memory_deps.count(i) > 0 || i >= _node->get_dependencies().size()) {
@@ -2155,6 +2182,7 @@ memory::ptr primitive_inst::allocate_output(engine& _engine,
         has_any_cpu_user_not_shape_of(_node.get_users()) ||
         !_engine.supports_allocation(allocation_type::usm_device) ||
         (_node.is_shape_infer_dep() && _engine.get_device_info().dev_type == device_type::integrated_gpu);
+
     const auto& lockable_mem_type = _engine.get_lockable_preferred_memory_allocation_type(layout.format.is_image_2d());
 
     auto alloc_type = use_lockable_memory ? lockable_mem_type
