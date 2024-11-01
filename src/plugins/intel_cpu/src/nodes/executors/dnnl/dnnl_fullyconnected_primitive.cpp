@@ -232,11 +232,11 @@ static DnnlPrimitiveAttrs createPrimitiveAttrs(const FCAttrs& attrs,
         if (dstPrc != f8e8m0 || useDynamicQuantization)
             dstPrc = ov::element::f32;
 
-        dnnlpoc.appendDecompressionScales(attrs.decompressionMultiplyPtr, !attrs.weightsNonTransposed, dstPrc);
+        dnnlpoc.appendDecompressionScalesLegacy(attrs.decompressionMultiplyPtr, !attrs.weightsNonTransposed, dstPrc);
     }
     if (attrs.decompressionSubtractPtr) {
         auto dstPrc = useDynamicQuantization ? ov::element::u8 : ov::element::f32;
-        dnnlpoc.appendDecompressionZeroPoints(attrs.decompressionSubtractPtr, !attrs.weightsNonTransposed, dstPrc);
+        dnnlpoc.appendDecompressionZeroPointsLegacy(attrs.decompressionSubtractPtr, !attrs.weightsNonTransposed, dstPrc);
     }
     if (useDynamicQuantization) {
         auto wei_precision = weiDesc->getPrecision();
@@ -247,7 +247,7 @@ static DnnlPrimitiveAttrs createPrimitiveAttrs(const FCAttrs& attrs,
             uint8_t zp_value = (wei_precision == ov::element::i8) ? 128 : 8;
             DnnlBlockedMemoryDesc zpMemoryDesc(ov::element::u8, Shape({1}));
             auto decompressionSubtractPtr = std::make_shared<Memory>(context->getEngine(), zpMemoryDesc, &zp_value);
-            dnnlpoc.appendDecompressionZeroPoints(decompressionSubtractPtr,
+            dnnlpoc.appendDecompressionZeroPointsLegacy(decompressionSubtractPtr,
                                                   !attrs.weightsNonTransposed,
                                                   ov::element::u8);
         }
