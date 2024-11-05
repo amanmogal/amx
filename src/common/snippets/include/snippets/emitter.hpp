@@ -34,10 +34,9 @@ struct Reg {
     friend bool operator<(const Reg& lhs, const Reg& rhs);
     friend bool operator>(const Reg& lhs, const Reg& rhs);
     friend bool operator!=(const Reg& lhs, const Reg& rhs);
+    friend std::ostream& operator<<(std::ostream& s, const Reg& r);
 };
 using RegInfo = std::pair<std::vector<Reg>, std::vector<Reg>>;
-
-std::string regTypeToStr(const RegType& type);
 
 /**
  * @interface Emitter

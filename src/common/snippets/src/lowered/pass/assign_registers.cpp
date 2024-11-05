@@ -28,6 +28,9 @@ namespace pass {
 
 void AssignRegisters::set_reg_types(LinearIR& linear_ir, std::map<Reg, std::pair<double, double>>& reg_life_range) {
     std::map<RegType, size_t> reg_counter;
+    ov::snippets::lowered::pass::SerializeControlFlow("snsdebug_assign_control.xml").run(linear_ir);
+    // Note: map expiring time to register
+    std::map<double, std::set<Reg>> live_reg;
     for (const auto& expr : linear_ir) {
         const auto op = expr->get_node();
         if (ov::is_type<op::LoopEnd>(op) ||
@@ -39,32 +42,26 @@ void AssignRegisters::set_reg_types(LinearIR& linear_ir, std::map<Reg, std::pair
         )
             continue;
         OPENVINO_ASSERT(expr->get_output_count() == op->get_output_size(), "Incorrect count of output port descriptors!");
+        const double start = expr->get_exec_num();
+        // Remove all regs that expired before start
+        live_reg.erase(live_reg.begin(), live_reg.upper_bound(start)); // remove all elements lower than start (not equal)
+        std::cerr << expr->get_node()->get_friendly_name() << " : ";
+        for (auto r : live_reg) {
+            for (auto x : r.second)
+                std::cerr << x << " ";
+        }
+        std::cerr << "\n";
         for (size_t i = 0; i < expr->get_output_count(); ++i) {
             const auto reg_type = m_reg_type_mapper(op->output(i));
             const auto& reg = Reg(reg_type, reg_counter[reg_type]++);
             expr->get_output_port_descriptor(i)->set_reg(reg);
-            const double start = expr->get_exec_num();
             double stop = start;
-
-            // examine live reg:
-            //  for (r : live_reg) {
-            //   if (start > r->end) // reg is dead
-            //      live_reg.erase(r)
-            //  }
-            // alternatively:
-            // std::map<double, Reg, std::greater<double>> live_reg; // store in descending order
-            // live_reg.erase(live_reg.lower_bound(start); live_reg.end()); // remove all elements lower than start (not equal)
-            // alternatively:
-            // std::map<double, Reg>> live_reg; // store in ascending order
-            // live_reg.erase(live_reg.begin(), live_reg.upper_bound(start); live_reg.end()); // remove all elements lower than start (not equal)
-
-            // insert reg into live
-
             // propogate to consumers
             for (const auto& consumer : expr->get_output_port_connector(i)->get_consumers()) {
                 consumer.get_descriptor_ptr()->set_reg(reg);
                 stop = std::max(stop, consumer.get_expr()->get_exec_num());
             }
+            live_reg[stop].insert(reg);
             reg_life_range[reg] = std::make_pair(start, stop);
         }
     }
@@ -154,31 +151,6 @@ bool AssignRegisters::run(LinearIR& linear_ir) {
 
     OV_ITT_SCOPE_NEXT(FIRST_INFERENCE, taskChain, "LifeRange");
 
-//    ov::snippets::lowered::pass::SerializeControlFlow("snsdebug_assign_control.xml").run(linear_ir);
-
-
-    // todo: remove
-//    auto print_life_info = [&]() {
-//        for (const auto& expr : exprs) {
-//            std::cerr << expr->get_node()->get_friendly_name() << " :";
-//            const auto& life = life_info[expr];
-//            std::cerr << "\n    IO: ";
-//            for (auto r : life.in)
-//                std::cerr << print_reg(r) << ", ";
-//            std::cerr << " | ";
-//            for (auto r : life.out)
-//                std::cerr << print_reg(r) << ", ";
-//            std::cerr << "\n    UD: ";
-//            for (auto r : life.used)
-//                std::cerr << print_reg(r) << ", ";
-//            std::cerr << " | ";
-//            for (auto r : life.defined)
-//                std::cerr << print_reg(r) << ", ";
-//            std::cerr << "\n";
-//        }
-//        std::cerr << "========================================\n";
-//    };
-
     OV_ITT_SCOPE_NEXT(FIRST_INFERENCE, taskChain, "LifeIntervals");
     struct by_starting {
         auto operator()(const Interval& lhs, const Interval& rhs) const -> bool {
@@ -238,7 +210,6 @@ bool AssignRegisters::run(LinearIR& linear_ir) {
     auto linescan_assign_registers = [](const decltype(live_intervals_vec)& live_intervals,
                                         const std::set<Reg>& reg_pool) {
         // http://web.cs.ucla.edu/~palsberg/course/cs132/linearscan.pdf
-        // todo: do we need multimap? <=> can an op have two inputs from the same op?
         std::map<Interval, Reg, by_ending> active;
         // uniquely defined register => reused reg (reduced subset enabled by reg by reusage)
         std::map<Reg, Reg> register_map;
