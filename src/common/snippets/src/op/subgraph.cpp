@@ -48,7 +48,6 @@
 #include "snippets/lowered/pass/validate.hpp"
 #include "snippets/lowered/pass/pass_config.hpp"
 #include "snippets/lowered/pass/reduce_decomposition.hpp"
-#include "snippets/lowered/pass/assign_registers.hpp"
 #include "snippets/lowered/pass/cleanup_loop_offsets.hpp"
 #include "snippets/lowered/pass/insert_specific_iterations.hpp"
 #include "snippets/lowered/pass/optimize_loop_single_evaluation.hpp"
@@ -56,6 +55,10 @@
 #include "snippets/lowered/pass/validate_expanded_loops.hpp"
 #include "snippets/lowered/pass/set_load_store_scalar.hpp"
 #include "snippets/lowered/pass/extract_loop_invariants.hpp"
+
+#include "snippets/lowered/reg_manager.hpp"
+#include "snippets/lowered/pass/assign_registers.hpp"
+#include "snippets/lowered/pass/init_live_ranges.hpp"
 
 #include "transformations/utils/utils.hpp"
 
@@ -510,7 +513,10 @@ void Subgraph::control_flow_transformations(size_t min_parallel_work_amount, siz
     //       (this might happen if tail loop and main loop have different increments)
     //    3. OptimizeLoopSingleEvaluation must be called after CleanupLoopOffsets
     //       since CleanupLoopOffsets can't handle loops with evaluate_once = true
-    gen_pipeline.register_pass<lowered::pass::AssignRegisters>(reg_type_mapper, get_generator()->get_target_machine()->get_reg_count());
+
+    lowered::RegManager reg_manager(reg_type_mapper);
+    gen_pipeline.register_pass<lowered::pass::InitLiveRanges>(reg_manager);
+    gen_pipeline.register_pass<lowered::pass::AssignRegisters>(reg_manager, get_generator()->get_target_machine()->get_reg_count());
     gen_pipeline.register_pass<lowered::pass::InsertSpecificIterations>();
     gen_pipeline.register_pass<lowered::pass::NormalizeLoopIDs>();
     gen_pipeline.register_pass<lowered::pass::ValidateExpandedLoops>();

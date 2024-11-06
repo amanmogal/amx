@@ -6,6 +6,7 @@
 
 #include "pass.hpp"
 #include "snippets/generator.hpp"
+#include "snippets/lowered/reg_manager.hpp"
 
 namespace ov {
 namespace snippets {
@@ -21,17 +22,15 @@ namespace pass {
 class AssignRegisters : public Pass {
 public:
     OPENVINO_RTTI("AssignRegisters", "Pass")
-    explicit AssignRegisters(const std::function<RegType(const ov::Output<Node>& out)>& mapper, const size_t reg_cnt)
-                            : m_reg_type_mapper(mapper), reg_count(reg_cnt) {}
+    explicit AssignRegisters(RegManager& reg_manager, const size_t reg_cnt)
+                            : m_reg_manager(reg_manager), reg_count(reg_cnt) {}
     bool run(LinearIR& linear_ir) override;
 
 private:
     using RegMap = std::map<Reg, Reg>;
-    using Interval = std::pair<double, double>;
-    void set_reg_types(LinearIR& linear_ir, std::map<Reg, std::pair<double, double>>& reg_life_range);
-    RegMap assign_regs_manually(LinearIR& linear_ir) const;
+    static RegMap assign_regs_manually(const LinearIR& linear_ir);
 
-    std::function<RegType(const ov::Output<Node>& out)> m_reg_type_mapper;
+    RegManager& m_reg_manager;
     size_t reg_count;
 };
 
