@@ -406,7 +406,7 @@ const std::vector<ExecutorImplementation<FCAttrs>>& getImplementations() {
                 return std::make_shared<ShlFCExecutor>(attrs, postOps, memory, context);
             }
         )
-        OV_CPU_INSTANCE_X64(
+        OV_CPU_INSTANCE_DNNL(
             "matmul_dnnl",
             ExecutorType::Dnnl,
             OperationType::MatMul,

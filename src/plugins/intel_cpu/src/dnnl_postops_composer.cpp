@@ -616,6 +616,9 @@ static MemoryPtr prepackDecompressionParams(const MemoryCPtr& paramsPtr,
 
 
 static dnnl::memory::dims getGroupDims(const VectorDims& weiDims, const VectorDims& scaleDims) {
+    if (scaleDims[0] == 1 && scaleDims[1] == 1)
+        return {};
+
     int N = weiDims[weiDims.size() - 2];
     int K = weiDims[weiDims.size() - 1];
     dnnl::memory::dim groupN = N / scaleDims[0];
@@ -630,9 +633,9 @@ static int getMask(const VectorDims& weiDims, const dnnl::memory::dims& groupDim
     int N = weiDims[weiDims.size() - 2];
     int K = weiDims[weiDims.size() - 1];
     int mask = 0;
-    if (groupDims[1] != N)
+    if (!groupDims.empty() && groupDims[1] != N)
         mask += maskN;
-    if (groupDims[0] != K)
+    if (!groupDims.empty() && groupDims[0] != K)
         mask += maskK;
 
     return mask;

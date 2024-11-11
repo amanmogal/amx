@@ -277,12 +277,13 @@ static VectorDims makeDummyOutputDims(const VectorDims& inShape, const VectorDim
 
 bool DnnlMatMulPrimitive::useWeightsDecompressionImpl(const ov::element::Type inputType,
                                                       const ov::element::Type weightsType) {
-    if (dnnl::impl::cpu::x64::mayiuse(dnnl::impl::cpu::x64::avx2)) {
-        // TODO: fp16
-        if (one_of(inputType, f32, bf16) && one_of(weightsType, u8, i8, u4, i4))
-            return true;
-    }
-    return false;
+#if defined(OPENVINO_ARCH_X86_64)
+    if (!dnnl::impl::cpu::x64::mayiuse(dnnl::impl::cpu::x64::avx2))
+        return false;
+#endif
+
+    // TODO: f16
+    return (one_of(inputType, f32, bf16) && one_of(weightsType, u8, i8, u4, i4));
 }
 
 DnnlShapeAgnosticDataPtr DnnlMatMulPrimitive::createShapeAgnosticData(const FCAttrs& attrs,
