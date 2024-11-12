@@ -160,13 +160,13 @@ static DnnlPrimitiveAttrs createPrimitiveAttrs(const MatMulAttrs& attrs,
 
     const auto maxRank = std::max({srcDesc->getShape().getRank(), weiDesc->getShape().getRank(), dstDesc->getShape().getRank()});
     auto normWeiDims = normalizeToRank(weiDesc->getShape().getStaticDims(), maxRank);
-    if (useWeightsDecompression && attrs.decompressionMultiplyPtr) {
+    if (attrs.decompressionMultiplyPtr) {
         auto dstPrc = ov::element::f32;
         dnnlpoc.appendDecompressionScales(attrs.decompressionMultiplyPtr, !weightsNonTransposed, dstPrc, normWeiDims);
     }
-    if (useWeightsDecompression && attrs.decompressionSubtractPtr) {
-        // TODO: clarify oneDNN requirements on ZP precision
-        auto dstPrc = ov::element::i32;
+    if (attrs.decompressionSubtractPtr) {
+        auto zpPrc = attrs.decompressionSubtractPtr->getPrecision();
+        auto dstPrc = one_of(zpPrc, i32, i8, u8, i4, u4) ? zpPrc : i32;
         dnnlpoc.appendDecompressionZeroPoints(attrs.decompressionSubtractPtr, !weightsNonTransposed, dstPrc, normWeiDims);
     }
 

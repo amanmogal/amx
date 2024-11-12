@@ -29,31 +29,31 @@ const std::vector<MatMulDecompressionShapeParams> input_shapes = {
 };
 const std::vector<fusingSpecificParams> fusing_params{emptyFusingSpec, fusingBias};
 
-// INSTANTIATE_TEST_SUITE_P(smoke_MatMulCompressedWeights,
-//                          MatmulWeightsDecompression,
-//                          ::testing::Combine(::testing::ValuesIn(input_shapes),
-//                                             ::testing::ValuesIn(weights_precisions),
-//                                             ::testing::ValuesIn(decompression_precisions),
-//                                             ::testing::Values(ov::element::undefined),
-//                                             ::testing::Values(true),
-//                                             ::testing::Values(DecompressionSubtractType::full),
-//                                             ::testing::Values(false),
-//                                             ::testing::ValuesIn(filter_additional_config_basic()),
-//                                             ::testing::ValuesIn(fusing_params),
-//                                             ::testing::Values(true)),
-//                          MatmulWeightsDecompression::getTestCaseName);
+INSTANTIATE_TEST_SUITE_P(smoke_MatMulCompressedWeights,
+                         MatmulWeightsDecompression,
+                         ::testing::Combine(::testing::ValuesIn(input_shapes),
+                                            ::testing::ValuesIn(weights_precisions),
+                                            ::testing::ValuesIn(decompression_precisions),
+                                            ::testing::Values(ov::element::undefined),
+                                            ::testing::Values(true),
+                                            ::testing::Values(DecompressionSubtractType::full),
+                                            ::testing::Values(false),
+                                            ::testing::ValuesIn(filter_additional_config_basic()),
+                                            ::testing::ValuesIn(fusing_params),
+                                            ::testing::Values(true)),
+                         MatmulWeightsDecompression::getTestCaseName);
 
 
 const std::vector<MatMulDecompressionShapeParams> input_shapes_corner_cases = {
-    // {{{-1, -1, -1}, {{1, 4, 16}}}, {1, 16, 32}},
+    {{{-1, -1, -1}, {{1, 4, 16}}}, {1, 16, 32}},
     {{{-1, -1, -1}, {{1, 4, 16}}}, {16, 32}},
-    // {{{-1, -1, -1}, {{1, 5, 16}}}, {16, 32}, 4ul},
-    // {{{-1, -1, -1}, {{1, 1, 128}}}, {128, 128}, 16ul},
+    {{{-1, -1, -1}, {{1, 5, 16}}}, {16, 32}, 4ul},
+    {{{-1, -1, -1}, {{1, 1, 128}}}, {128, 128}, 16ul},
 };
 
 const std::vector<bool> transpose_weights = {true, false};
 const std::vector<DecompressionSubtractType> decompression_subtract_type = {
-    /*DecompressionSubtractType::full,*/ DecompressionSubtractType::scalar/*, DecompressionSubtractType::empty*/};
+    DecompressionSubtractType::full, DecompressionSubtractType::scalar, DecompressionSubtractType::empty};
 const std::vector<bool> reshape_on_decompression = {true, false};
 const std::vector<ov::test::ElementType> decompression_precisions_corner_cases = {ov::element::f16, ov::element::f32};
 
