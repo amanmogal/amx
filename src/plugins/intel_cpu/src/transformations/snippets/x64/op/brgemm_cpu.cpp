@@ -131,7 +131,8 @@ std::shared_ptr<Node> BrgemmCPU::clone_with_new_inputs(const OutputVector& new_a
 }
 
 std::shared_ptr<BrgemmCopyB> BrgemmCPU::get_brgemm_copy() const {
-    OPENVINO_ASSERT(one_of(m_type, BRGEMM_TYPE::REPACKING_ONLY, BRGEMM_TYPE::WITH_COMPENSATIONS, BRGEMM_TYPE::WITH_AMX), "Brgemm doesn't need BrgemmCopyB");
+    OPENVINO_ASSERT(one_of(m_type, BRGEMM_TYPE::REPACKING_ONLY, BRGEMM_TYPE::WITH_COMPENSATIONS, BRGEMM_TYPE::WITH_AMX,
+    BRGEMM_TYPE::WITH_AMX_F16), "Brgemm doesn't need BrgemmCopyB");
     auto b_input_node = get_input_node_shared_ptr(1);
     if (const auto brgemm_copy_b = ov::as_type_ptr<BrgemmCopyB>(b_input_node)) {
         return brgemm_copy_b;
