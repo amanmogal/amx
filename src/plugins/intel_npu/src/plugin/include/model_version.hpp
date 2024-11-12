@@ -10,7 +10,7 @@
 
 namespace intel_npu {
 
-constexpr std::string_view DELIMITER = "OVNPU";
+constexpr std::string_view MAGIC_BYTES = "OVNPU";
 
 constexpr int CURRENT_METAVERSION_MAJOR = 1;
 constexpr int CURRENT_METAVERSION_MINOR = 0;

@@ -58,18 +58,18 @@ bool Metadata<1, 0>::isCompatible() {
     if (version.major != CURRENT_METAVERSION_MAJOR || version.minor != CURRENT_METAVERSION_MINOR) {
         return false;
     }
-    // checking if we can import the blob
+    // Checking if we can import the blob
     return ovVersion.version == ov::get_openvino_version().buildNumber;
 }
 
 std::unique_ptr<MetadataBase> read_metadata_from(std::vector<uint8_t>& blob) {
     Logger _logger("NPUPlugin", Logger::global().level());
-    size_t delimiterSize = DELIMITER.size();
-    std::string blobVersionHeader(delimiterSize, '\0');
+    size_t magicBytesSize = MAGIC_BYTES.size();
+    std::string blobMagicBytes(magicBytesSize, '\0');
 
-    auto metadataIterator = blob.end() - delimiterSize;
-    memcpy(blobVersionHeader.data(), &(*metadataIterator), delimiterSize);
-    if (DELIMITER != blobVersionHeader) {
+    auto metadataIterator = blob.end() - magicBytesSize;
+    memcpy(blobMagicBytes.data(), &(*metadataIterator), magicBytesSize);
+    if (MAGIC_BYTES != blobMagicBytes) {
         _logger.error("Blob is not versioned");
         return nullptr;
     }
@@ -77,8 +77,8 @@ std::unique_ptr<MetadataBase> read_metadata_from(std::vector<uint8_t>& blob) {
     size_t blobDataSize;
     metadataIterator -= sizeof(blobDataSize);
     memcpy(&blobDataSize, &(*metadataIterator), sizeof(blobDataSize));
-
     metadataIterator = blob.begin() + blobDataSize;
+
     std::stringstream metadataStream;
     metadataStream.write(reinterpret_cast<const char*>(&(*metadataIterator)),
                          blob.end() - metadataIterator - sizeof(blobDataSize));
