@@ -97,13 +97,6 @@ private:
     ////////////////////////////////////
     // now own API
 
-    void log_subrequest_launch(std::size_t idx, std::size_t real_idx);
-    void log_launch_on_range(std::size_t real_idx, std::size_t dim,
-                             std::size_t offset, std::size_t len);
-    void try_accurate_infer(std::size_t idx, bool& failover);
-    void ensure_subrequest_is_accurate(std::size_t idx, bool& failover);
-    void update_subrequest_links(std::size_t idx);
-
     // FIXME: probably this one should go to the base class too
     RqPtr get_real_subrequest(std::size_t idx);
 
@@ -113,9 +106,9 @@ private:
     void function_prologue(std::size_t idx);
     void unpack_closure(std::size_t idx, RqPtr request);
 
-    void unsafe_during(std::size_t real_idx, const std::function<void()>& f, bool& failover);
-    void unsafe_infer(std::size_t real_idx, bool& failover);
-    void unsafe_run_this_prep_next(std::size_t idx, bool& next_prepared_p, bool& failover);
+    void unsafe_during(std::size_t idx, const std::function<void()>& f, bool& accuracy_failover);
+    void unsafe_infer(std::size_t idx, bool& accuracy_failover);
+    void unsafe_run_this_prep_next(std::size_t idx, bool& next_prepared, bool& accuracy_failover);
 
     void connect_subrequests();
     void recreate_subrequests(std::size_t idx);
@@ -155,9 +148,6 @@ private:
     std::vector<GlobalIO> m_subrequests_gio;
 
     std::unordered_set<void*> m_input_allocated;
-
-    // Represents spatial run-time info
-    runtime::spatial::Selector::Ptr m_spatial_selector;
 
     // Cached check if we do FOLDing and need to update closures in the repeating blocks
     bool m_closure_update_required = false;
