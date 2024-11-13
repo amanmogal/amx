@@ -67,10 +67,8 @@ pass::BrgemmToBrgemmCPU::BrgemmToBrgemmCPU() {
         const auto& layout_c = brgemm_out_desc->get_layout();
 
         const auto element_type_a = brgemm->get_input_element_type(0);
-        std::cout << "element_type_a is:" << element_type_a << std::endl;
         const bool transpose_b = !layout_b.empty() && layout_b.back() != layout_b.size() - 1;
         const auto brgemm_type = brgemm_utils::get_brgemm_type(element_type_a, K, transpose_b);
-        std::cout << "brgemm_type is:" << static_cast<int>(brgemm_type) << std::endl;
         const auto offset_a = brgemm->get_offset_a();
         const auto offset_b = brgemm->get_offset_b();
         const auto offset_c = brgemm->get_offset_c();
