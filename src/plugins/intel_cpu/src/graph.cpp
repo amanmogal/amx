@@ -7,7 +7,6 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdlib>
-#include <iostream>
 #include <iterator>
 #include <limits>
 #include <map>
@@ -71,7 +70,7 @@ template<typename NET>
 void Graph::CreateGraph(NET &model, const GraphContext::CPtr context) {
     OV_ITT_SCOPE(FIRST_INFERENCE, itt::domains::intel_cpu_LT, "CreateGraph");
 
-    Init(model, std::make_shared<GraphContext>(context->disableMemoryReuse()));
+    Init(model, context);
 
     Activate();
 }
@@ -83,7 +82,7 @@ void Graph::CreateGraph(const std::vector<NodePtr>& graphNodes,
     if (IsReady())
         ForgetGraphData();
 
-    m_context = std::make_shared<GraphContext>(context->disableMemoryReuse());
+    m_context = context;
     m_stream = dnnl::stream(getEngine());
 
     this->_name = std::move(name);
@@ -353,20 +352,11 @@ static void UseExternalOutputMemory(const std::map<std::size_t, NodePtr>& output
 
 void Graph::Activate(const std::vector<MemoryPtr>& externalInputMemory,
                      const std::vector<MemoryPtr>& externalOutputMemory) {
-    // OPENVINO_ASSERT(status == Status::Initialized, "Invalid graph status");
-
-    // const bool hasDynNodes = ProcessDynNodes();
-    // const auto syncNodesInds = hasDynNodes ? IdentifySyncPoints(graphNodes) : std::vector<size_t>{};
+    OPENVINO_ASSERT(status == Status::Initialized, "Invalid graph status");
 
     UseExternalInputMemory(inputNodesMap, externalInputMemory);
     UseExternalOutputMemory(outputNodesMap, externalOutputMemory);
 
-    // std::tie(m_executableGraphNodes, m_executableSyncNodesInds) = ExtractExecutableNodesAndSyncPoints(syncNodesInds, graphNodes);
-
-    // status = hasDynNodes ? (parallel_get_max_threads() > 1 ? Status::ReadyDynamic : Status::ReadyDynamicSeq)
-    //     : Status::ReadyStatic;
-
-    // CPU_DEBUG_CAP_ENABLE(serialize(*this));
     Allocate();
 
     CreatePrimitivesAndExecConstants();
@@ -706,7 +696,7 @@ void Graph::ResolveComplexInplaceConflicts() {
 }
 
 /**
- * Partition the \clusters of Edges, by moving and allocating at the same time
+ * Partition the \clusters of Edges, by moving to the end and allocating at the same time
  * the clusters which cannot be handled as part of generic memory solver algorithm.
  * Such clusters meet one of the following criteria:
  * - base edge of a cluster is already Allocated
@@ -737,7 +727,6 @@ static size_t AllocateStringsAndConstants(EdgeClusters& clusters,
     };
 
     auto allocateConstantEdge = [context](const EdgePtr& edge) {
-        // std::cout << "Allocating constant edge: " << edge->name() << " wc: " << context->getWeightsCache() << "\n";
         if (edge->getParent()->getType() == Type::Input) {
             auto constNode = std::static_pointer_cast<node::Input>(edge->getParent());
             edge->reuse(std::const_pointer_cast<IMemory>(constNode->getMemoryPtr()));
@@ -746,7 +735,7 @@ static size_t AllocateStringsAndConstants(EdgeClusters& clusters,
         }
     };
 
-    auto endOfNotAllocatedPartition =
+    auto notAllocatedPartitionEnd =
         std::partition(clusters.begin(), clusters.end(),
                        [&allocateStringMemory, &allocateConstantEdge, &context](const EdgeCluster& cluster) {
                            if (cluster.empty()) return false;
@@ -757,14 +746,10 @@ static size_t AllocateStringsAndConstants(EdgeClusters& clusters,
 
                            OPENVINO_ASSERT(baseEdgeIt != cluster.end(), "Unexpected cluster state");
 
-                           // const auto& baseEdge = cluster.front();
                            const auto& baseEdge = *baseEdgeIt;
-                           // Skip already allocated cluster
                            if (baseEdge->getStatus() == Edge::Status::Allocated) {
                                return false;
                            }
-
-                           // std::cout << "Processing string/const for base edge: " << baseEdge->name() << "\n";
 
                            // Skip if the baseEdge does not require allocation
                            if (baseEdge->getStatus() != Edge::Status::NeedAllocation) {
@@ -800,7 +785,7 @@ static size_t AllocateStringsAndConstants(EdgeClusters& clusters,
                            return true;
                        });
 
-    return std::distance(clusters.begin(), endOfNotAllocatedPartition);
+    return std::distance(clusters.begin(), notAllocatedPartitionEnd);
 }
 
 static void AllocateBaseEdges(const EdgeClusters& edgeClusters,
@@ -808,14 +793,9 @@ static void AllocateBaseEdges(const EdgeClusters& edgeClusters,
     // attach all the not yet allocated edges to the memory control
     for (auto&& item : memorySolution) {
         int count = 0;
-        // std::cout << "Processing cluster: " << item.first << "\n";
         for (auto&& edge : edgeClusters[item.first]) {
-            // std::cout << "Processing base edge: " << edge->name() << "\n";
             if (edge->getStatus() == Edge::Status::NeedAllocation) {
-                // std::cout << "Allocating edge: " << edge->name() << "\n";
-
                 edge->allocate(item.second);
-
                 // TODO: WA for some test (like strided_slice_test) which use tensors with
                 //       shapes {0}. And it is implicitly converted into {1} tensor.
                 //       Zeroing of input data allow pass tests.
@@ -845,7 +825,6 @@ static void AllocatedReferencingEdges(const EdgeClusters& clusters) {
             }
 
             std::for_each(edges_to_process.rbegin(), edges_to_process.rend(), [](const EdgePtr& edge) {
-                // std::cout << "Processing referencing edge: " << edge->name() << "\n";
                 if (edge->getStatus() == Edge::Status::NotAllocated) {
                     if (edge->inPlace(Edge::LOOK_DOWN)) {
                         edge->getChild()->resolveInPlaceEdges(Edge::LOOK_DOWN);
@@ -854,7 +833,6 @@ static void AllocatedReferencingEdges(const EdgeClusters& clusters) {
                     } else {
                         auto sharedEdge = edge->getSharedEdge();
                         auto sharedEdgeParent = sharedEdge->getParent();
-                        // std::cout << "Allocating edge: " << edge->name() << " Using shared edge: " << sharedEdge->name() << "\n";
                         edge->allocate(sharedEdge->getMemoryPtr()->getMemoryBlock());
                         DEBUG_LOG(*edge, " sharedEdge with ", *sharedEdge);
                     }
@@ -892,23 +870,6 @@ std::vector<size_t> Graph::CreateExecutionGraph() {
     return syncNodesInds;
 }
 
-static void ResolveInOutInPlaceEdgesLegacy(const std::vector<EdgePtr>& edges) {
-    for (const auto& edge : edges) {
-        // std::cout << edge->name() << "\n";
-        if (edge->getStatus() == Edge::Status::Uninitialized) {
-            if (edge->getParent()->getParentEdges().empty() &&
-                one_of(edge->getParent()->getType(), Type::Input, Type::MemoryInput) &&
-                edge->inPlace(Edge::LOOK_UP)) {
-                edge->getParent()->resolveInPlaceEdges(Edge::LOOK_UP);
-            } else if (edge->getChild()->getChildEdges().empty() &&
-                one_of(edge->getChild()->getType(), Type::Output, Type::MemoryOutput) &&
-                edge->inPlace(Edge::LOOK_DOWN)) {
-                edge->getChild()->resolveInPlaceEdges(Edge::LOOK_DOWN);
-            }
-        }
-    }
-}
-
 static void ResolveInOutInPlaceEdges(const std::vector<EdgePtr>& edges) {
     for (const auto& edge : edges) {
         if (edge->getStatus() == Edge::Status::Uninitialized) {
@@ -929,7 +890,6 @@ int Graph::RegisterToAllocationContext(int offset, AllocationContext& context) {
     auto syncNodesInds = CreateExecutionGraph();
 
     ResolveInOutInPlaceEdges(graphEdges);
-    // std::cout << "RegisterToAllocationContext: " << offset << "\n";
 
     // nodes are expected to be topologically sorted
     for (size_t execIndex = 0, j = 0; execIndex < graphNodes.size(); execIndex++) {
@@ -940,7 +900,6 @@ int Graph::RegisterToAllocationContext(int offset, AllocationContext& context) {
         const auto outputExecIndex = offset;
         offset++;
         context.execIndex[node] = {inputExecIndex, outputExecIndex};
-        // std::cout << node->getName() << " - " << "[" << inputExecIndex << "," << outputExecIndex << "] offset " << offset << "\n";
 
         if (j < syncNodesInds.size() && syncNodesInds[j] == execIndex) {
             context.syncPoints.push_back(inputExecIndex);
@@ -951,28 +910,6 @@ int Graph::RegisterToAllocationContext(int offset, AllocationContext& context) {
     context.edges.insert(context.edges.end(), graphEdges.begin(), graphEdges.end());
 
     return offset - 1;
-}
-
-AllocationContext Graph::CreateAllocationContext(bool global) {
-    AllocationContext allocationContext;
-
-    if (global) {
-        RegisterToAllocationContext(0, allocationContext);
-    } else { // local allocation context. Used for the nodes with inner graph which are not updated yet
-        ResolveInOutInPlaceEdgesLegacy(graphEdges);
-
-        auto syncNodesInds = CreateExecutionGraph();
-
-        for (size_t i = 0; i < graphNodes.size(); i++) {
-            const auto& node = graphNodes[i];
-            allocationContext.execIndex[node] = {i, i};
-        }
-
-        allocationContext.edges = graphEdges;
-        allocationContext.syncPoints = syncNodesInds;
-    }
-
-    return allocationContext;
 }
 
 static void InitEdgeStatus(const std::vector<EdgePtr>& edges) {
@@ -1057,22 +994,14 @@ static MemoryRegions FormMemoryRegions(const EdgeClusters& clusters,
         int64_t boxSize = 0;
         bool isConst = false, isOutput = false, isInput = false;
 
-        // std::cout << "Form memory region for cluster: " << i << "\n";
-
         for (auto &edge : clusters[i]) {
             const auto& parent = edge->getParent();
             const auto& child = edge->getChild();
 
-            // @todo this is can be considered as a property of the node, whether it is going to use input / output memory multiple times
-            // in scope of its execution routine
-            int e_start = parent->getType() == Type::TensorIterator ?  globalExecIndex.at(parent).first : globalExecIndex.at(parent).second;
-            int e_finish = child->getType() == Type::TensorIterator ?  globalExecIndex.at(child).second : globalExecIndex.at(child).first;
-
-            // std::cout << "[" << e_start << " - " << e_finish << "]"
-            //           << edge->name()
-            //           << "\n";
-
-            // int e_finish = edge->getChild()->getExecIndex();
+            // If node uses its input / output memory multiple times in scope of a single execution (i.e TensorIterator)
+            // prolong the lifetime of a memory region till execution is finished
+            int e_start = parent->usesInOutMemoryMultipleTimes() ?  globalExecIndex.at(parent).first : globalExecIndex.at(parent).second;
+            int e_finish = child->usesInOutMemoryMultipleTimes() ?  globalExecIndex.at(child).second : globalExecIndex.at(child).first;
 
             auto&& desc = edge->getDesc();
 
@@ -1133,7 +1062,7 @@ static OutputMemoryBlocks FilterOutDynamicOutputEdges(MemoryRegions& memoryRegio
             if (child->getType() == Type::Output && edge->getStatus() == Edge::Status::NeedAllocation) {
                 auto proxyMemBlock = std::make_shared<ProxyMemoryBlock>();
                 DEBUG_LOG("ProxyMemoryBlock ", proxyMemBlock);
-                // std::cout << "Allocating output edge: " << edge->name() << "\n";
+
                 edge->allocate(proxyMemBlock);
 
                 // Store the output memory blocks.
@@ -1165,7 +1094,7 @@ static OutputMemoryBlocks FilterOutDynamicOutputEdges(MemoryRegions& memoryRegio
  * 2) OutputMemoryBlocks - to allow memory sharing between graph and infer request
  */
 static std::tuple<MemoryControl::MemorySolution, EdgeClusters, OutputMemoryBlocks>
-SolveMemoryReuse(MemoryControl* memoryControl,
+SolveMemoryReuse(const std::shared_ptr<MemoryControl>& memoryControl,
                  const AllocationContext& allocationContext,
                  const GraphContext::CPtr graphContext,
                  const std::map<std::size_t, NodePtr>& outputNodesMap) {
@@ -1190,26 +1119,14 @@ SolveMemoryReuse(MemoryControl* memoryControl,
 }
 
 void Graph::Allocate() {
-    auto globalAllocation = m_context->memoryReuseGlobal();
+    auto memoryControl = m_context->getMemoryControl();
 
-    if (std::getenv("LOCAL_REUSE")) {
-        globalAllocation = false;
-    }
-
-    // Set up the memory control subsystem.
-    auto memoryControl = globalAllocation ? m_context->getMemoryControl() : m_context->getNetworkMemoryControl()->createMemoryControlUnit();
-
-    // memory is already allocated globally
     if (memoryControl->allocated()) {
-        return;
+        return; // memory is already allocated globally
     }
 
-    auto allocationContext = CreateAllocationContext(globalAllocation);
-
-    for (const auto& entry : allocationContext.execIndex) {
-        OPENVINO_ASSERT(entry.second.first >= 0);
-        OPENVINO_ASSERT(entry.second.second >= 0);
-    }
+    AllocationContext allocationContext;
+    RegisterToAllocationContext(0, allocationContext);
 
     const auto& edges = allocationContext.edges;
     InitEdgeStatus(edges);
@@ -1218,21 +1135,12 @@ void Graph::Allocate() {
     EdgeClusters edgeClusters;
     std::tie(solution, edgeClusters, m_outputNodesMemBlocks) = SolveMemoryReuse(memoryControl, allocationContext, m_context, outputNodesMap);
 
-    // std::cout << "### Global edges:" << "\n";
-    // for (const auto& edge : edges) {
-    //     const auto& parent = edge->getParent();
-    //     const auto& child = edge->getChild();
-    //     std::cout << "[" << allocationContext.execIndex[parent].second << " - "
-    //               << (child->getType() == Type::TensorIterator ? allocationContext.execIndex[child].second : allocationContext.execIndex[child].first) << "]"
-    //               << edge->name()
-    //               << "\n";
-    // }
-
     AllocateBaseEdges(edgeClusters, solution);
 
     memoryControl->allocateMemory();
 
     AllocatedReferencingEdges(edgeClusters);
+
     ValidateEdgeStatus(edges);
 }
 

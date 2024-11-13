@@ -204,24 +204,10 @@ void MemoryBlockWithReuse::setExtBuff(void *ptr, size_t size) {
     m_data = decltype(m_data)(ptr, release);
 }
 
-// class MemoryUsage {
-// public:
-//     MemoryUsage() {}
-
-//     ~MemoryUsage() {
-//         std::cout << "Total memory usage: " << total << "\n";
-//     }
-
-//     int total = 0;
-// };
-
 bool MemoryBlockWithReuse::resize(size_t size) {
-    // static MemoryUsage mu;
-
     constexpr int cacheLineSize = 64;
     bool sizeChanged = false;
     if (size > m_memUpperBound) {
-        // mu.total += size;
         void *ptr = dnnl::impl::malloc(size, cacheLineSize);
         if (!ptr) {
             OPENVINO_THROW("Failed to allocate ", size, " bytes of memory");

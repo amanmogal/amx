@@ -51,8 +51,8 @@ void LoRA::selectOptimalPrimitiveDescriptor() {
     auto mainInputPrc = mainInputDesc->getPrecision(); // we have to align precision across all the inputs
 
     inConfs.emplace_back(mainInputDesc);
-    // @todo should be always inplace after global memory reuse is fully supported by all the nodes
-    bool isInPlace = true;
+
+    const bool isInPlace = true;
     graphInputConfig.emplace_back(node::Input::InputConfig{mainInputDesc, isInPlace});
 
     for (size_t i = 1; i < getParentEdges().size(); i++) {
@@ -89,8 +89,6 @@ void LoRA::selectOptimalPrimitiveDescriptor() {
 }
 
 int LoRA::registerToAllocationContext(int offset, AllocationContext& context) {
-    // if (!this->context->memoryReuseGlobal())
-    //     return Node::registerToAllocationContext(offset, context);
     for (size_t i = 0; i < getOriginalInputsNumber(); i++) {
         auto parentEdge = getParentEdgeAt(i);
         auto inputEdges = m_graph.GetInputNodesMap().at(i)->getChildEdgesAtPort(0);
@@ -110,11 +108,10 @@ int LoRA::registerToAllocationContext(int offset, AllocationContext& context) {
     return m_graph.RegisterToAllocationContext(offset, context);
 }
 
-// @todo add ascii diagram for memory mapping / reuse
 void LoRA::createPrimitive() {
     CPU_NODE_ASSERT(getOriginalInputsNumber() == m_graph.GetInputNodesMap().size(),
                     "Number of node inputs must be equal the number of inner graph's inputs");
-    // Workaround to avoid making LoRa node always executable (isExecutable()) true
+    // Workaround to avoid making LoRa node always executable (isExecutable() = true)
     // This way we update subgraph's input memory without performing an actual Infer() call
     for (size_t i = 0; i < getOriginalInputsNumber(); i++) {
         const auto& subgraphInputNode = m_graph.GetInputNodesMap().at(i);

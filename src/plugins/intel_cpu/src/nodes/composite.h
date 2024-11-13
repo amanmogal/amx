@@ -4,9 +4,7 @@
 
 #pragma once
 
-#include <cstddef>
 #include <memory>
-#include <numeric>
 
 #include "graph.h"
 #include "node.h"

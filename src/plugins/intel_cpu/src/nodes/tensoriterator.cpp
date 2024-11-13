@@ -8,7 +8,6 @@
 #include "common/reorder_prim.h"
 #include "dnnl_extension_utils.h"
 #include "shape_inference/shape_inference_internal_dyn.hpp"
-#include "transformations/utils/utils.hpp"
 #include "utils/general_utils.h"
 #include "utils/debug_capabilities.h"
 #include "openvino/op/tensor_iterator.hpp"
@@ -402,178 +401,16 @@ TensorIterator::TensorIterator(const std::shared_ptr<ov::Node>& op, const GraphC
     }
 }
 
-// void TensorIterator::getSupportedDescriptors() {
-void TensorIterator::selectOptimalPrimitiveDescriptor() {
-    // auto tiOp = ov::as_type_ptr<const ov::op::util::SubGraphOp>(ngraphOp);
-    // if (!tiOp) {
-    //     THROW_ERROR("cannot be cast to ov::op::util::SubGraphOp");
-    // }
-    // const std::shared_ptr<const ov::Model> body = tiOp->get_function();
-    // sub_graph.CreateGraph(body, context);
-
-    // const auto &inMap = sub_graph.GetInputNodesMap();
-    // for (const auto &param : tiOp->get_function()->get_parameters()) {
-    //     auto inNode = inMap.find(tiOp->get_function()->get_parameter_index(param));
-    //     if (inNode != inMap.end()) {
-    //         input_mems.push_back(getToMemories(inNode->second.get(), 0));
-    //     }
-    // }
-
-    // const auto &outMap = sub_graph.GetOutputNodesMap();
-    // for (const auto &out : tiOp->get_function()->get_results()) {
-    //     auto outNode = outMap.find(tiOp->get_function()->get_result_index(out));
-    //     if (outNode != outMap.end()) {
-    //         auto outMem = outNode->second->getSrcMemoryAtPort(0);
-    //         output_mem.push_back(outMem);
-    //     }
-    // }
-
-    // // Port map: outputs
-    // for (const auto& desc : tiOp->get_output_descriptions()) {
-    //     auto body_output_idx = desc->m_body_value_index;
-
-    //     std::string type_name = desc->get_type_info().name;
-    //     if (type_name == "ConcatOutputDescription") {
-    //         auto output_desc = ov::as_type_ptr<const ov::op::util::SubGraphOp::ConcatOutputDescription>(desc);
-    //         OPENVINO_ASSERT(output_desc != nullptr);
-
-    //         outputPortMap.emplace_back(PortMap {
-    //                 static_cast<int>(output_desc->m_output_index), static_cast<int>(body_output_idx),
-    //                 static_cast<int>(output_desc->m_axis), static_cast<int>(output_desc->m_stride),
-    //                 static_cast<int>(output_desc->m_start), static_cast<int>(output_desc->m_end),
-    //                 static_cast<int>(output_desc->m_part_size)});
-    //     } else if (type_name == "BodyOutputDescription") {
-    //         auto output_desc = ov::as_type_ptr<const ov::op::util::SubGraphOp::BodyOutputDescription>(desc);
-    //         OPENVINO_ASSERT(output_desc != nullptr);
-
-    //         outputPortMap.emplace_back(PortMap {
-    //                 static_cast<int>(output_desc->m_output_index), static_cast<int>(body_output_idx), -1, 1, 0, -1, 1});
-    //     } else {
-    //         OPENVINO_THROW("Incorrect type of the output description.");
-    //     }
-    // }
-
-    // // Port map : inputs and back edges
-    // for (const auto& desc : tiOp->get_input_descriptions()) {
-    //     auto body_input_index = desc->m_body_parameter_index;
-
-    //     if (auto slice_desc = ov::as_type_ptr<const ov::op::util::SubGraphOp::SliceInputDescription>(desc)) {
-    //         inputPortMap.emplace_back(PortMap {
-    //                 static_cast<int>(slice_desc->m_input_index), static_cast<int>(body_input_index),
-    //                 static_cast<int>(slice_desc->m_axis), static_cast<int>(slice_desc->m_stride),
-    //                 static_cast<int>(slice_desc->m_start), static_cast<int>(slice_desc->m_end),
-    //                 static_cast<int>(slice_desc->m_part_size)});
-    //     } else if (auto merge_desc = ov::as_type_ptr<const ov::op::util::SubGraphOp::MergedInputDescription>(desc)) {
-    //         inputPortMap.emplace_back(PortMap {
-    //                 static_cast<int>(merge_desc->m_input_index), static_cast<int>(body_input_index), -1, 1, 0, -1, 1});
-
-    //         auto body_output_idx = merge_desc->m_body_value_index;
-
-    //         backEdges.emplace_back(PortMap {
-    //                 static_cast<int>(body_output_idx), static_cast<int>(body_input_index), -1, 1, 0, -1, 1});
-    //     } else if (auto inv_desc = ov::as_type_ptr<const ov::op::util::SubGraphOp::InvariantInputDescription>(desc)) {
-    //         inputPortMap.emplace_back(PortMap {
-    //                 static_cast<int>(inv_desc->m_input_index), static_cast<int>(body_input_index), -1, 1, 0, -1, 1});
-    //     } else {
-    //         THROW_ERROR("has incorrect type of the input description.");
-    //     }
-    // }
-
-    // if (auto loopOp = ov::as_type_ptr<const ov::op::v5::Loop>(ngraphOp)) {
-    //     algorithm = Algorithm::TensorIteratorLoop;
-    //     auto spec_port = loopOp->get_special_body_ports();
-    //     if (spec_port.current_iteration_input_idx != -1) {
-    //         loopBodyCurrentIterationIdx.push_back(spec_port.current_iteration_input_idx);
-    //     }
-    //     if (spec_port.body_condition_output_idx != -1) {
-    //         loopBodyConditionOutputIdx = spec_port.body_condition_output_idx;
-    //     }
-    //     loopTripCountIdx = 0;
-    //     loopExecutionConditionIdx = 1;
-    // } else if (auto ti = ov::as_type_ptr<const ov::op::v0::TensorIterator>(ngraphOp)) {
-    //     algorithm = Algorithm::TensorIteratorCommon;
-    // } else {
-    //     THROW_ERROR("isn't supported!");
-    // }
-    // supportedPrimitiveDescriptors.emplace_back(make_plain_config(ngraphOp), impl_desc_type::unknown);
-    // selectPrimitiveDescriptorByIndex(0);
-
-    // for the input configuration, just always use the parent configuration
+void TensorIterator::initSupportedPrimitiveDescriptors() {
     auto subgraphOp = ov::as_type_ptr<const ov::op::util::SubGraphOp>(ngraphOp);
-    // const auto numParameters = subgraphOp->get_function()->get_parameters().size();
-    // const auto numResults = subgraphOp->get_function()->get_results().size();
 
-    // std::vector<PortConfig> inConfs(inputShapes.size());
-    // std::vector<PortConfig> outConfs(outputShapes.size());
-
-    // std::vector<Input::InputConfig> inputConfig(numParameters);
-    // std::vector<Input::OutputConfig> outputConfig(numResults);
-
-    // // @todo should be always inplace when global memory reuse is fully supported by all the nodes
-    // bool isInPlace = false;
-
-    // for (const auto& description : subgraphOp->get_output_descriptions()) {
-    //     const auto outIdx = description->m_output_index;
-    //     const auto resultIdx = description->m_body_value_index;
-
-    //     const auto &origShape = subgraphOp->get_output_partial_shape(outIdx);
-    //     const auto& shape = Shape(origShape.rank().get_length() == 0 ? ov::PartialShape{1} : origShape);
-    //     const auto prec = subgraphOp->get_output_element_type(outIdx);
-
-    //     auto descCreator = BlockedDescCreator::getCommonCreators().at(LayoutType::ncsp);
-    //     auto desc = descCreator->createSharedDesc(prec, shape);
-
-    //     outConfs.at(outIdx) = PortConfig(desc);
-    //     outputConfig.at(resultIdx) = node::Input::OutputConfig{desc, isInPlace};
-    // }
-
-    // auto inputDescriptions = subgraphOp->get_input_descriptions();
-
-    // for (const auto& description : inputDescriptions) {
-    //     const auto inIdx = description->m_input_index;
-    //     const auto paramIdx = description->m_body_parameter_index;
-
-    //     const auto &origShape = subgraphOp->get_input_partial_shape(inIdx);
-    //     const auto& shape = Shape(origShape.rank().get_length() == 0 ? ov::PartialShape{1} : origShape);
-    //     const auto prec = subgraphOp->get_input_element_type(inIdx);
-
-    //     auto descCreator = BlockedDescCreator::getCommonCreators().at(LayoutType::ncsp);
-    //     auto desc = descCreator->createSharedDesc(prec, shape);
-
-    //     // auto desc = getParentOutputMemDesc(getParentEdgeAt(inIdx));
-    //     inConfs.at(inIdx) = PortConfig(desc);
-    //     inputConfig.at(paramIdx) = node::Input::InputConfig{desc, isInPlace};
-    // }
-
-    // configure the inner graph to get the information about output memory descriptors
-    // sub_graph.Init(subgraphOp->get_function(), context, inputConfig, outputConfig);
     sub_graph.Init(subgraphOp->get_function(), context);
 
-    // for the output descriptors, use the configuration of the graph's output nodes
-    // auto outputDescriptors = sub_graph.getOutputMemoryDescriptors();
-    // auto outputDescriptions = subgraphOp->get_output_descriptions();
+    if (!supportedPrimitiveDescriptors.empty())
+        return;
 
-    // for (const auto& description : outputDescriptions) {
-    //     auto outIdx = description->m_output_index;
-    //     auto resultIdx = description->m_body_value_index;
-    //     outConfs.at(outIdx) = PortConfig(outputDescriptors.at(resultIdx));
-    // }
-
-    // const NodeConfig config(inConfs, outConfs);
-
-    supportedPrimitiveDescriptors.clear();
     supportedPrimitiveDescriptors.emplace_back(make_plain_config(ngraphOp), impl_desc_type::unknown);
-    // supportedPrimitiveDescriptors.emplace_back(config, impl_desc_type::undef);
-
-    selectPrimitiveDescriptorByIndex(0);
 }
-
-// void TensorIterator::initSupportedPrimitiveDescriptors() {
-//     if (!supportedPrimitiveDescriptors.empty())
-//         return;
-
-//     supportedPrimitiveDescriptors.emplace_back(make_plain_config(ngraphOp), impl_desc_type::unknown);
-// }
 
 void TensorIterator::createPrimitive() {
     sub_graph.Activate();

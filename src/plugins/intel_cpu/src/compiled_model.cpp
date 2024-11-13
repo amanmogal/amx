@@ -158,17 +158,14 @@ CompiledModel::GraphGuard::Lock CompiledModel::get_graph() const {
                 GraphContext::Ptr ctx;
                 {
                     std::lock_guard<std::mutex> lock{*m_mutex.get()};
-                    MemoryControl* memoryControl = m_networkMemoryControl->createMemoryControlUnit();
                     auto isQuantizedFlag = (m_cfg.lpTransformsMode == Config::On) &&
                                            ov::pass::low_precision::LowPrecision::isFunctionQuantized(m_model);
                     ctx = std::make_shared<GraphContext>(m_cfg,
                                                          m_socketWeights[socketId],
                                                          isQuantizedFlag,
-                                                         memoryControl,
-                                                         m_networkMemoryControl,
+                                                         m_networkMemoryControl->createMemoryControlUnit(),
                                                          streamsExecutor,
-                                                         m_sub_memory_manager,
-                                                         true);
+                                                         m_sub_memory_manager);
                 }
 
                 const std::shared_ptr<const ov::Model> model = m_model;
@@ -356,7 +353,7 @@ void CompiledModel::release_memory() {
     for (auto&& graph : m_graphs) {
         GraphGuard::Lock graph_lock{graph};
         auto ctx = graph_lock._graph.getGraphContext();
-        m_networkMemoryControl->releaseMemory();
+        ctx->getMemoryControl()->releaseMemory();
     }
 }
 

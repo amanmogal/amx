@@ -77,7 +77,7 @@ protected:
                         "MergeTransposeReorderCPUTest doesn't support shape", shape,
                         ". Only 4D and 3D shapes are supported");
         Config conf;
-        m_context = std::make_shared<GraphContext>(conf, nullptr, false, networkMemoryControl->createMemoryControlUnit(), networkMemoryControl);
+        m_context = std::make_shared<GraphContext>(conf, nullptr, false, networkMemoryControl->createMemoryControlUnit());
         const auto replication_result = CreateModelAndReplicate(shape,
                                                                 params.firstNodeLayout,
                                                                 params.firstNodeInplaceDirection,
@@ -338,7 +338,7 @@ TEST(MergeTransposeReorder, smoke_InplaceConflict) {
     Config conf;
     conf.rtCacheCapacity = 100;
     std::shared_ptr<NetworkMemoryControl> networkMemoryControl = std::make_shared<NetworkMemoryControl>();
-    auto context = std::make_shared<GraphContext>(conf, nullptr, false, networkMemoryControl->createMemoryControlUnit(), networkMemoryControl);
+    auto context = std::make_shared<GraphContext>(conf, nullptr, false, networkMemoryControl->createMemoryControlUnit());
 
     std::unique_ptr<Graph> graph = std::unique_ptr<Graph>(new Graph());
 

@@ -29,11 +29,9 @@ public:
     GraphContext(const Config& config,
                  WeightsSharing::Ptr w_cache,
                  bool isGraphQuantized,
-                 MemoryControl* memoryControl,
-                 std::shared_ptr<NetworkMemoryControl> networkMemoryControl, // obsolete in favor of local memoryControl
+                 std::shared_ptr<MemoryControl> memoryControl,
                  ov::threading::IStreamsExecutor::Ptr streamExecutor = nullptr,
-                 std::shared_ptr<SubMemoryManager> sub_memory_manager = nullptr,
-                 bool globalMemoryReuse = true);
+                 std::shared_ptr<SubMemoryManager> sub_memory_manager = nullptr);
 
     const Config& getConfig() const {
         return config;
@@ -82,22 +80,8 @@ public:
         return memoryStatesRegister;
     }
 
-    MemoryControl* getMemoryControl() const {
+    const std::shared_ptr<MemoryControl>& getMemoryControl() const {
         return memoryControl;
-    }
-
-    const std::shared_ptr<NetworkMemoryControl>& getNetworkMemoryControl() const {
-        return networkMemoryControl;
-    }
-
-    const bool memoryReuseGlobal() const {
-        return m_globalMemoryReuse;
-    }
-
-    GraphContext disableMemoryReuse() const {
-        GraphContext copy = *this;
-        copy.m_globalMemoryReuse = false;
-        return copy;
     }
 
 private:
@@ -121,13 +105,8 @@ private:
     int numNumaNodes = 1;
 
     std::shared_ptr<node::MemoryStatesRegister> memoryStatesRegister;
-    MemoryControl* memoryControl;
-    // to be removed in favor of local memoryControl
-    // currently required for the nodes with inner graphs which
-    // do not participate in global memory reuse
-    std::shared_ptr<NetworkMemoryControl> networkMemoryControl;
 
-    bool m_globalMemoryReuse = false;
+    std::shared_ptr<MemoryControl> memoryControl;
 };
 
 }  // namespace intel_cpu

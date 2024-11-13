@@ -136,7 +136,7 @@ void SyncInferRequest::infer() {
 
     push_input_data();
 
-    MemoryControl* network_memory_control = m_graph->getGraphContext()->getMemoryControl();
+    auto network_memory_control = m_graph->getGraphContext()->getMemoryControl();
     if (!network_memory_control) {
         OPENVINO_THROW("Memory control unit is not initilized for graph: ", m_graph->GetName());
     }

@@ -110,8 +110,8 @@ public:
         auto context = std::make_shared<GraphContext>(conf,
                                                       std::make_shared<WeightsSharing>(),
                                                       false,
-                                                      networkMemoryControl->createMemoryControlUnit(),
-                                                      networkMemoryControl);
+                                                      networkMemoryControl->createMemoryControlUnit());
+
         const dnnl::engine cpuEngine = context->getEngine();
 
         inputNode = std::make_shared<ov::intel_cpu::node::Input>(inputDesc.clone(),

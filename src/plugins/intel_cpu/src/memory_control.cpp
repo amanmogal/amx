@@ -5,13 +5,10 @@
 #include "memory_control.hpp"
 
 #include <cstddef>
-#include <new>
+#include <memory>
 #include <ov_optional.hpp>
 
-#include "edge.h"
-#include "node.h"
 #include "openvino/runtime/memory_solver.hpp"
-#include "proxy_mem_blk.h"
 #include "utils/general_utils.h"
 
 namespace ov {
@@ -299,16 +296,6 @@ MemoryControl::RegionHandlerPtr buildHandler(F&& f, Args&&... args) {
 
 MemoryControl::MemoryControl() {
     // init handlers
-    // handler for dynamic tensors
-    if (std::getenv("DISABLE_REUSE")) {
-        //handler for I/O tensors, so far simply individual blocks
-        m_handlers.emplace_back(buildHandler<MemoryManagerIO>([](const MemoryRegion& reg) {
-            return true;
-        }));
-
-        return;
-    }
-
     m_handlers.emplace_back(buildHandler<MemoryManagerStatic>([](const MemoryRegion& reg) {
         if (reg.size < 0 || MemoryRegion::RegionType::VARIABLE != reg.type ||
             MemoryRegion::AllocType::POD != reg.alloc_type) {
@@ -379,9 +366,9 @@ void MemoryControl::releaseMemory() {
     m_allocated = false;
 }
 
-MemoryControl* NetworkMemoryControl::createMemoryControlUnit() {
-    m_controlUnits.emplace_back(std::unique_ptr<MemoryControl>(new MemoryControl()));
-    return m_controlUnits.back().get();
+std::shared_ptr<MemoryControl> NetworkMemoryControl::createMemoryControlUnit() {
+    m_controlUnits.emplace_back(std::shared_ptr<MemoryControl>(new MemoryControl()));
+    return m_controlUnits.back();
 }
 
 void NetworkMemoryControl::allocateMemory() {

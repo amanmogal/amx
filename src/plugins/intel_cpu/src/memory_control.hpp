@@ -61,14 +61,14 @@ private:
 class NetworkMemoryControl {
 public:
     NetworkMemoryControl() = default;
-    // @todo return std::reference_wrapper instead?
-    MemoryControl* createMemoryControlUnit();
+
+    std::shared_ptr<MemoryControl> createMemoryControlUnit();
 
     void allocateMemory();
     void releaseMemory();
 
 private:
-    using value_type = std::unique_ptr<MemoryControl>;
+    using value_type = std::shared_ptr<MemoryControl>;
 
 private:
     std::vector<value_type> m_controlUnits;

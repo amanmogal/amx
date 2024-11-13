@@ -46,8 +46,7 @@ public:
         const auto context = std::make_shared<const GraphContext>(conf,
                                                                   nullptr,
                                                                   false,
-                                                                  networkMemoryControl->createMemoryControlUnit(),
-                                                                  networkMemoryControl);
+                                                                  networkMemoryControl->createMemoryControlUnit());
 
         std::shared_ptr<Graph> graph = std::shared_ptr<Graph>(new Graph());
 

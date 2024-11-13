@@ -4,9 +4,7 @@
 
 #include "composite.h"
 
-#include "compiled_model.h"
 #include "nodes/input.h"
-#include "cpu_memory.h"
 #include "transformations/cpu_opset/common/op/submodel.hpp"
 #include "utils/debug_capabilities.h"
 #include "shape_inference/shape_inference_internal_dyn.hpp"
@@ -44,8 +42,7 @@ void Composite::selectOptimalPrimitiveDescriptor() {
     std::vector<PortConfig> inConfs;
     std::vector<Input::InputConfig> graphInputConfig;
 
-    // @todo should be always inplace after global memory reuse is fully supported by all the nodes
-    bool isInPlace = true;
+    const bool isInPlace = true;
 
     for (size_t i = 0; i < getParentEdges().size(); i++) {
         auto desc = getParentOutputMemDesc(getParentEdgeAt(i));

@@ -11,20 +11,16 @@ namespace intel_cpu {
 GraphContext::GraphContext(const Config& config,
                            WeightsSharing::Ptr w_cache,
                            bool isGraphQuantized,
-                           MemoryControl* memoryControl,
-                           std::shared_ptr<NetworkMemoryControl> networkMemoryControl,
+                           std::shared_ptr<MemoryControl> memoryControl,
                            ov::threading::IStreamsExecutor::Ptr streamExecutor,
-                           std::shared_ptr<SubMemoryManager> sub_memory_manager,
-                           bool globalMemoryReuse)
+                           std::shared_ptr<SubMemoryManager> sub_memory_manager)
     : config(config),
       weightsCache(std::move(w_cache)),
       isGraphQuantizedFlag(isGraphQuantized),
       streamExecutor(streamExecutor),
       subMemoryManager(sub_memory_manager),
       memoryStatesRegister(std::make_shared<node::MemoryStatesRegister>()),
-      memoryControl(memoryControl),
-      networkMemoryControl(networkMemoryControl),
-      m_globalMemoryReuse(globalMemoryReuse) {
+      memoryControl(memoryControl) {
     rtParamsCache = std::make_shared<MultiCache>(config.rtCacheCapacity);
     // primitive/executors can be shared across sub-stream
     // but scratch pad cannot be shared.

@@ -14,7 +14,6 @@
 #include "graph_context.h"
 #include "openvino/runtime/profiling_info.hpp"
 
-#include <algorithm>
 #include <map>
 #include <memory>
 #include <string>
@@ -91,9 +90,6 @@ public:
 
     void PushInputData(const std::size_t& index, const ov::SoPtr<ITensor>& input);
     void PullOutputData(std::unordered_map<std::size_t, ov::SoPtr<ITensor>>& output);
-    // @todo pass as part of one of the graph configuration stages
-    // void SetGlobalExecutionIndex() {
-    // }
 
     // Returns Output nodes memory descriptors
     VecMemoryDescs getOutputMemoryDescriptors() const;
@@ -232,17 +228,11 @@ public:
 
     /**
      * Activate execution graph using \p externalInputMemory and \p externalOutputMemory
-     * 'globalAllocation' is a temporary flag indicating that the current graph is participaing in
-     * global memory reuse (together with all inner / outer graphs).
-     * The flag should be dropped after all the nodes with inner graphs participate in
-     * global memory reuse by default
      */
     void Activate(const std::vector<MemoryPtr>& externalInputMemory = {},
                   const std::vector<MemoryPtr>& externalOutputMemory = {});
 
     void Allocate();
-
-    AllocationContext CreateAllocationContext(bool global);
 
     /**
      * Register the graph in the global allocation context by transforming

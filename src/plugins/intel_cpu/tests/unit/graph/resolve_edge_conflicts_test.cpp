@@ -48,8 +48,7 @@ TEST(ResolveEdgeConflictsCPUTest, smoke_Run_ResolveEdgeConflicts) {
     auto context = std::make_shared<GraphContext>(conf,
                                                   nullptr,
                                                   false,
-                                                  networkMemoryControl->createMemoryControlUnit(),
-                                                  networkMemoryControl);
+                                                  networkMemoryControl->createMemoryControlUnit());
     const dnnl::engine cpuEngine = context->getEngine();
 
     std::unique_ptr<Graph> graph = std::unique_ptr<Graph>(new Graph());
@@ -111,7 +110,7 @@ TEST(ResolveEdgeConflictsCPUTest2, smoke_Run_ResolveEdgeConflicts2) {
     Config conf;
     conf.rtCacheCapacity = 100;
     std::shared_ptr<NetworkMemoryControl> networkMemoryControl = std::make_shared<NetworkMemoryControl>();
-    auto context = std::make_shared<GraphContext>(conf, nullptr, false, networkMemoryControl->createMemoryControlUnit(), networkMemoryControl);
+    auto context = std::make_shared<GraphContext>(conf, nullptr, false, networkMemoryControl->createMemoryControlUnit());
 
     std::unique_ptr<Graph> graph = std::unique_ptr<Graph>(new Graph());
 

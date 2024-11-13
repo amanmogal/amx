@@ -44,7 +44,6 @@ using NodePtr = std::shared_ptr<Node>;
 using NodeConstPtr = std::shared_ptr<const Node>;
 using NodeWeakPtr = std::weak_ptr<Node>;
 
-
 class PortConfigurator {
 public:
     PortConfigurator(ov::intel_cpu::LayoutType blockedDescType, ov::element::Type prc, const Shape& shape,
@@ -295,6 +294,9 @@ public:
 
     bool isInPlace() const;
 
+    // @todo also pass a port which memory is used from
+    virtual bool usesInOutMemoryMultipleTimes() { return false; }
+
     virtual bool canBeSkipped() const {
         return getSelectedPrimitiveDescriptor()->hasZeroInputDims();
     }
@@ -311,7 +313,6 @@ public:
     ConstantType getConstantType() const;
     void updateConstantType();
     bool isConstant();
-    bool isConstantInput();
 
     // return type int supports return -1 in overloading when channel axis doesn't exist
     virtual int getFusingAxis() const {
@@ -517,8 +518,14 @@ public:
         return execIndex;
     }
 
+    /**
+     * @brief Register node to the allocation \context
+     *
+     * The main use case are nodes with nested graphs.
+     * Use this method to make nested graphs a part of global allocation procedure
+     */
     virtual int registerToAllocationContext(int offset, AllocationContext& context) {
-        (void) context;
+        (void) context; // nothing to register by default
         return offset;
     }
 
