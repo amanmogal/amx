@@ -132,12 +132,19 @@ void MatmulWeightsDecompression::SetUp() {
     std::tie(postOpMgrPtr, fusedOps) = fusing_params;
     init_input_shapes({shape_params.data_shape});
 
+    if (!configuration.count(ov::hint::dynamic_quantization_group_size.name())) {
+        abs_threshold = 5e-3;
+    }
+
     // if dynamic quantization is enabled
     if (configuration.count(ov::hint::dynamic_quantization_group_size.name()) &&
         configuration.at(ov::hint::dynamic_quantization_group_size.name()) != 0) {
         abs_threshold = 0.1;
-    } else if (!configuration.count(ov::hint::dynamic_quantization_group_size.name())) {
-        abs_threshold = 5e-3;
+    }
+
+    if (configuration.count(ov::hint::inference_precision.name()) &&
+        configuration.at(ov::hint::inference_precision.name()) == ov::element::f16) {
+        abs_threshold = 0.1;
     }
 
     ElementType netType = ov::element::f32;
@@ -164,10 +171,11 @@ void MatmulWeightsDecompression::check_results() {
     const auto result = runtime_model->get_result();
     auto fc = result->get_input_node_shared_ptr(0);
     // Handle precision conversion before output
-    if (fc->get_rt_info().at(ov::exec_model_info::LAYER_TYPE).as<std::string>() == "Reorder")
+    auto type = fc->get_rt_info().at(ov::exec_model_info::LAYER_TYPE).as<std::string>();
+    if (type == "Reorder" || type == "Convert" || type == "Subgraph")
         fc = fc->get_input_node_shared_ptr(0);
 
-    const auto type = fc->get_rt_info().at(ov::exec_model_info::LAYER_TYPE).as<std::string>();
+    type = fc->get_rt_info().at(ov::exec_model_info::LAYER_TYPE).as<std::string>();
     EXPECT_EQ(type, "FullyConnected");
 
     const auto& expected_weights_precision = use_matmul_decompression_impl

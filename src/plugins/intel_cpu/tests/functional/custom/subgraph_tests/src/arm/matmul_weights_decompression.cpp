@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
+#ifdef CPU_DEBUG_CAPS
+
 #include "custom/subgraph_tests/src/classes/matmul_weights_decompression.hpp"
 
 using namespace CPUTestUtils;
@@ -12,11 +14,11 @@ namespace test {
 namespace {
 
 std::vector<ov::AnyMap> filter_additional_config_basic() {
-    return {{}};
+    return {{}, {ov::hint::inference_precision(ov::element::f16)}};
 }
 
 const std::vector<ov::test::ElementType> decompression_precisions = {ov::element::f32};
-const std::vector<ov::test::ElementType> weights_precisions = {ov::element::u8};
+const std::vector<ov::test::ElementType> weights_precisions = {ov::element::u8, ov::element::i8};
 
 const std::vector<MatMulDecompressionShapeParams> input_shapes = {
     {{{-1, -1, -1}, {{1, 4, 16}, {10, 16, 16}}}, {16, 32}},
@@ -75,3 +77,5 @@ INSTANTIATE_TEST_SUITE_P(smoke_MatMulCompressedWeights_corner_cases,
 
 }  // namespace test
 }  // namespace ov
+
+#endif

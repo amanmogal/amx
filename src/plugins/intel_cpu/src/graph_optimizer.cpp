@@ -396,10 +396,6 @@ void GraphOptimizer::FuseFCAndWeightsDecompression(Graph &graph) {
         if (supportedWeightsPrecisions.find(weightsNode->getOriginalOutputPrecisionAtPort(0)) == supportedWeightsPrecisions.end()) {
             SKIP_FUSION_FOR_NODE(fcNode);
         }
-        if (withSubtract &&
-            !one_of(subtractConstNode->getOriginalOutputPrecisionAtPort(0), weightsNode->getOriginalOutputPrecisionAtPort(0), ov::element::f32)) {
-            SKIP_FUSION_FOR_NODE(fcNode);
-        }
 
         // Shape limitations
         const auto weightsShape = weightsNode->getOutputShapeAtPort(0);

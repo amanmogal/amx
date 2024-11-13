@@ -172,7 +172,7 @@ static DnnlPrimitiveAttrs createPrimitiveAttrs(const MatMulAttrs& attrs,
 
     auto primAttrs = dnnlpoc.compose();
     if (useWeightsDecompression) {
-        primAttrs.attr.set_fpmath_mode(fpmath_mode::bf16, true);
+        primAttrs.attr.set_fpmath_mode(fpmath_mode::any, true);
     }
 
     return primAttrs;
@@ -282,8 +282,7 @@ bool DnnlMatMulPrimitive::useWeightsDecompressionImpl(const ov::element::Type in
         return false;
 #endif
 
-    // TODO: f16
-    return (one_of(inputType, f32, bf16) && one_of(weightsType, u8, i8, u4, i4));
+    return (one_of(inputType, f32, bf16, f16) && one_of(weightsType, u8, i8, u4, i4));
 }
 
 DnnlShapeAgnosticDataPtr DnnlMatMulPrimitive::createShapeAgnosticData(const FCAttrs& attrs,
