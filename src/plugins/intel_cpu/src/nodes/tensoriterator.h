@@ -106,11 +106,14 @@ public:
     TensorIterator(const std::shared_ptr<ov::Node>& op, const GraphContext::CPtr context);
 
     static bool isSupportedOperation(const std::shared_ptr<const ov::Node>& op, std::string& errorMessage) noexcept;
-    void initSupportedPrimitiveDescriptors() override;
-    void getSupportedDescriptors() override;
+    void initSupportedPrimitiveDescriptors() override {};
+    void getSupportedDescriptors() override {};
+    void selectOptimalPrimitiveDescriptor() override;
     void createPrimitive() override;
+    int registerToAllocationContext(int offset, AllocationContext& context) override;
     bool created() const override;
     void execute(dnnl::stream strm) override;
+    bool canBeSkipped() const override { return false; }
     bool isExecutable() const override { return true; }
 
 protected:
