@@ -352,7 +352,10 @@ static void UseExternalOutputMemory(const std::map<std::size_t, NodePtr>& output
 
 void Graph::Activate(const std::vector<MemoryPtr>& externalInputMemory,
                      const std::vector<MemoryPtr>& externalOutputMemory) {
-    OPENVINO_ASSERT(status == Status::Initialized, "Invalid graph status");
+    // @todo It is possible that execution graph is already created in scope of
+    // the allocation context collection from the outer graph so the state for inner graph is "Ready"
+    // We probably want to avoid such uncertancy
+    // OPENVINO_ASSERT(status == Status::Initialized, "Invalid graph status: ", static_cast<int>(status));
 
     UseExternalInputMemory(inputNodesMap, externalInputMemory);
     UseExternalOutputMemory(outputNodesMap, externalOutputMemory);
