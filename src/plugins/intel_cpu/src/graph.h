@@ -69,7 +69,7 @@ public:
     /**
      * Obsolete way of creating graph
      * To enable layout propagation and global memory reuse
-     * two stage creation should be used instead:
+     * two-stage creation should be used instead:
      * - Init()
      * - Allocate()
      */
@@ -79,7 +79,7 @@ public:
     /**
      * Obsolete way of creating graph
      * To enable layout propagation and global memory reuse
-     * two stage creation should be used instead:
+     * two-stage creation should be used instead:
      * - Init()
      * - Allocate()
      */
@@ -217,6 +217,11 @@ public:
     }
 
     const std::unordered_map<std::string, node::MemoryStateNode*>& getInternalStateNodes() const;
+
+    void Init(const std::vector<NodePtr> &graphNodes,
+              const std::vector<EdgePtr> &graphEdges,
+              const GraphContext::CPtr context,
+              std::string name);
 
     /**
      * Init graph using \p model, \p context, \p inputConfigs and \p outputConfigs

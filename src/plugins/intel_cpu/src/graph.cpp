@@ -75,10 +75,10 @@ void Graph::CreateGraph(NET &model, const GraphContext::CPtr context) {
     Activate();
 }
 
-void Graph::CreateGraph(const std::vector<NodePtr>& graphNodes,
-                        const std::vector<EdgePtr>& graphEdges,
-                        const GraphContext::CPtr context,
-                        std::string name) {
+void Graph::Init(const std::vector<NodePtr>& graphNodes,
+                 const std::vector<EdgePtr>& graphEdges,
+                 const GraphContext::CPtr context,
+                 std::string name) {
     if (IsReady())
         ForgetGraphData();
 
@@ -103,6 +103,13 @@ void Graph::CreateGraph(const std::vector<NodePtr>& graphNodes,
     }
 
     Configure();
+}
+
+void Graph::CreateGraph(const std::vector<NodePtr>& graphNodes,
+                        const std::vector<EdgePtr>& graphEdges,
+                        const GraphContext::CPtr context,
+                        std::string name) {
+    Init(graphNodes, graphEdges, context, name);
 
     Activate();
 }
