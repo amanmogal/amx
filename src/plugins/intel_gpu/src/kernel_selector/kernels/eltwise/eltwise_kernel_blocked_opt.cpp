@@ -28,6 +28,8 @@ ParamsKey EltwiseKernel_blocked_opt::GetSupportedKey() const {
     k.EnableOutputDataType(Datatype::F32);
     k.EnableOutputDataType(Datatype::INT8);
     k.EnableOutputDataType(Datatype::UINT8);
+    k.EnableInputLayout(DataLayout::bfyx);
+    k.EnableOutputLayout(DataLayout::bfyx);
     k.EnableInputLayout(DataLayout::b_fs_yx_fsv4);
     k.EnableOutputLayout(DataLayout::b_fs_yx_fsv4);
     k.EnableInputLayout(DataLayout::b_fs_yx_fsv16);
@@ -140,6 +142,11 @@ bool EltwiseKernel_blocked_opt::Validate(const Params& params) const {
         if (ewParams.inputs[i].LogicalSize() == input0.LogicalSize() && !(compareTensors(ewParams.inputs[i], input0)))
             return false;
         if (ewParams.inputs[i].Feature().pad.before % vec_size != 0) {
+            return false;
+        }
+        if ((ewParams.inputs[i].GetLayout() == DataLayout::bfyx) &&
+            (ewParams.inputs[i].LogicalSize() != ewParams.inputs[i].Feature().v) &&
+            (ewParams.inputs[i].LogicalSize() != ewParams.outputs[0].Feature().v)) {
             return false;
         }
     }
@@ -422,6 +429,7 @@ static inline int SelectVecSizeFromFormat(const DataTensor& tensor) {
 static inline int GetInnerBatchBlockSize(const DataTensor& tensor) {
     auto layout = tensor.GetLayout();
     switch (layout) {
+    case DataLayout::bfyx:
     case DataLayout::b_fs_yx_fsv4:
     case DataLayout::b_fs_yx_fsv16:
     case DataLayout::b_fs_zyx_fsv16:
