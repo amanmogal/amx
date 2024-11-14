@@ -15,7 +15,7 @@
 #include "intel_npu/config/compiler.hpp"
 #include "intel_npu/config/npuw.hpp"
 #include "intel_npu/config/runtime.hpp"
-#include "model_version.hpp"
+#include "metadata.hpp"
 #include "intel_npu/utils/zero/zero_init.hpp"
 #include "npuw/compiled_model.hpp"
 #include "openvino/op/constant.hpp"
@@ -786,7 +786,7 @@ std::shared_ptr<ov::ICompiledModel> Plugin::import_model(std::istream& stream, c
 
         auto storedMeta = read_metadata_from(blob);
         if (storedMeta == nullptr) {
-            OPENVINO_THROW("Couldn't read blob version.");
+            OPENVINO_THROW("Could not read metadata!");
         } else if (!storedMeta->isCompatible()) {
             // _logger.info print for storedMeta members or use std::cout?
             OPENVINO_THROW("Incompatible blob metadata version!");

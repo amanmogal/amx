@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
-#include "model_version.hpp"
+#include "metadata.hpp"
 
 #include <cstring>
 #include <sstream>
@@ -22,7 +22,7 @@ void OpenvinoVersion::read(std::istream& stream) {
     stream.read(&version[0], size);
 }
 
-Metadata<1, 0>::Metadata() : version{1, 0}, ovVersion{ov::get_openvino_version().buildNumber} {}
+Metadata<CURRENT_METAVERSION_MAJOR, 0>::Metadata() : version{CURRENT_METAVERSION_MAJOR, 0}, ovVersion{ov::get_openvino_version().buildNumber} {}
 
 void Metadata<1, 0>::read(std::istream& stream) {
     ovVersion.read(stream);
