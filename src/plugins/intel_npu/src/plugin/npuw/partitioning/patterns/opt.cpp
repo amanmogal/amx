@@ -158,8 +158,8 @@ DQMatMulCWi::DQMatMulCWi() {
             auto matched_node_cvtw = node_to_output.at(qcvtw).get_node_shared_ptr();
             auto matched_node_muls = node_to_output.at(qmuls).get_node_shared_ptr();
             auto matched_node_mmi = node_to_output.at(qmmi).get_node_shared_ptr();
-            auto matched_node_qcoeff_out = uat::_(node_to_output).at_or_at_or_at(qcvtc, reshapec, qcoeff);
-            auto matched_node_muls_out = uat::_(node_to_output).at_or_at(qcvtm, qmuls);
+            auto& matched_node_qcoeff_out = uat::_(node_to_output).at_or_at_or_at(qcvtc, reshapec, qcoeff);
+            auto& matched_node_muls_out = uat::_(node_to_output).at_or_at(qcvtm, qmuls);
 
             // Reconnect MatMul to read from Convert(W) directly.
             // Note: ACT has to be converted too.
@@ -1331,7 +1331,7 @@ SliceLastMatmul::SliceLastMatmul() {
     auto callback = [=](ov::pass::pattern::Matcher& m) {
         auto& node_to_output = m.get_pattern_value_map();
 
-        auto matched_out_matmul = node_to_output.at(matmul);
+        auto& matched_out_matmul = node_to_output.at(matmul);
 
         auto shape = matched_out_matmul.get_node()->input(0).get_shape();
 
@@ -1367,7 +1367,7 @@ SliceLastMatmulAdd::SliceLastMatmulAdd() {
     auto callback = [=](ov::pass::pattern::Matcher& m) {
         auto& node_to_output = m.get_pattern_value_map();
 
-        auto matched_out_matmul = node_to_output.at(matmul);
+        auto& matched_out_matmul = node_to_output.at(matmul);
 
         auto shape = matched_out_matmul.get_node()->input(0).get_shape();
 
@@ -1403,7 +1403,7 @@ SliceLastMatmulTranspose::SliceLastMatmulTranspose() {
     auto callback = [=](ov::pass::pattern::Matcher& m) {
         auto& node_to_output = m.get_pattern_value_map();
 
-        auto matched_out_matmul = node_to_output.at(matmul);
+        auto& matched_out_matmul = node_to_output.at(matmul);
 
         auto shape = matched_out_matmul.get_node()->input(0).get_shape();
 
@@ -1441,7 +1441,7 @@ SliceLastMatmulMultiply::SliceLastMatmulMultiply() {
     auto callback = [=](ov::pass::pattern::Matcher& m) {
         auto& node_to_output = m.get_pattern_value_map();
 
-        auto matched_out_matmul = node_to_output.at(matmul);
+        auto& matched_out_matmul = node_to_output.at(matmul);
 
         auto shape = matched_out_matmul.get_node()->input(0).get_shape();
 
