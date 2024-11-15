@@ -72,6 +72,14 @@ struct GemmImplementationManager : public ImplementationManager {
         if (gemm_prim->indirect_a || gemm_prim->indirect_b)
             return false;
 
+        // Keep this condition until gemm_onednn supports transposed order of output
+        const int64_t OTO_SIZE = static_cast<int64_t>(gemm_prim->output_transpose_order.size());
+        if (OTO_SIZE > 0 &&
+            !(gemm_prim->output_transpose_order[OTO_SIZE - 2] == (OTO_SIZE - 2) &&
+            gemm_prim->output_transpose_order[OTO_SIZE - 1] == (OTO_SIZE - 1))) {
+            return false;
+        }
+
         return true;
     }
 
