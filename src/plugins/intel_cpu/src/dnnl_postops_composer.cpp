@@ -630,12 +630,10 @@ static dnnl::memory::dims getGroupDims(const VectorDims& weiDims, const VectorDi
 static int getMask(const VectorDims& weiDims, const dnnl::memory::dims& groupDims) {
     const int maskN = 1 << (weiDims.size() - 1);
     const int maskK = 1 << (weiDims.size() - 2);
-    int N = weiDims[weiDims.size() - 2];
-    int K = weiDims[weiDims.size() - 1];
     int mask = 0;
-    if (!groupDims.empty() && groupDims[1] != N)
+    if (!groupDims.empty())
         mask += maskN;
-    if (!groupDims.empty() && groupDims[0] != K)
+    if (!groupDims.empty())
         mask += maskK;
 
     return mask;
@@ -649,6 +647,12 @@ void DnnlPostOpsComposer::appendDecompressionScales(
     auto scaleMem = prepackDecompressionParams(scales_ptr, needTranspose, dstPrecision, engine);
     auto groupDims = getGroupDims(weiDims, scaleMem->getStaticDims());
     auto mask = getMask(weiDims, groupDims);
+
+    // [WA] OneDNN JIT Brgemm Matmul shows bad performance with PER-OC scaling passed via non-empty groups
+    if (!groupDims.empty() && scaleMem->getStaticDims()[1] == 1) {
+        groupDims = {};
+        mask = 1 << (weiDims.size() - 1);
+    }
 
     attr.set_scales(DNNL_ARG_WEIGHTS, mask, groupDims, DnnlExtensionUtils::ElementTypeToDataType(dstPrecision));
     cpuArgs[DNNL_ARG_ATTR_SCALES | DNNL_ARG_WEIGHTS] = std::move(scaleMem);
