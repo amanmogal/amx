@@ -299,8 +299,18 @@ size_t intel_cpu::CPUTargetMachine::get_lanes() const {
     }
 }
 
-size_t intel_cpu::CPUTargetMachine::get_reg_count() const {
-    return 16;
+size_t intel_cpu::CPUTargetMachine::get_gp_reg_count() const {
+    // Note: 2 registers should always be reserved for RSP and RBP
+    return 16 - 2;
+}
+
+size_t intel_cpu::CPUTargetMachine::get_vec_reg_count() const {
+    switch (isa) {
+        case dnnl::impl::cpu::x64::avx2 : return dnnl::impl::cpu::x64::cpu_isa_traits<dnnl::impl::cpu::x64::avx2>::n_vregs;
+        case dnnl::impl::cpu::x64::sse41 : return dnnl::impl::cpu::x64::cpu_isa_traits<dnnl::impl::cpu::x64::sse41>::n_vregs;
+        case dnnl::impl::cpu::x64::avx512_core : return dnnl::impl::cpu::x64::cpu_isa_traits<dnnl::impl::cpu::x64::avx512_core>::n_vregs;
+        default : OPENVINO_THROW("unknown isa ", isa);
+    }
 }
 
 dnnl::impl::cpu::x64::cpu_isa_t intel_cpu::CPUTargetMachine::get_isa() const {

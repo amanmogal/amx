@@ -26,68 +26,71 @@ namespace snippets {
 namespace lowered {
 namespace pass {
 
-AssignRegisters::RegMap AssignRegisters::assign_regs_manually(const LinearIR& linear_ir) {
+AssignRegisters::RegMap AssignRegisters::assign_regs_manually(const LinearIR& linear_ir, std::set<Reg>& gpr_pool, std::set<Reg>& vec_pool) {
     RegMap manually_assigned;
-    size_t io_index = 0;
     for (const auto& param : linear_ir.get_parameters()) {
-        manually_assigned[param->get_output_port_descriptor(0)->get_reg()] = Reg(RegType::gpr, io_index);
+        const auto& assigned = *gpr_pool.begin();
+        manually_assigned[param->get_output_port_descriptor(0)->get_reg()] = assigned;
         // TODO [96434]: Support shape infer ops in arbitrary place in pipeline, not just after inputs
         // shape infer ops sequence after input
         const auto& shape_infer_consumers = utils::get_first_child_shape_infer_expr_seq(param);
         for (const auto& child_shape_infer_expr : shape_infer_consumers) {
-            manually_assigned[child_shape_infer_expr->get_output_port_descriptor(0)->get_reg()] = Reg(RegType::gpr, io_index);
+            manually_assigned[child_shape_infer_expr->get_output_port_descriptor(0)->get_reg()] = assigned;
         }
-        io_index++;
+        gpr_pool.erase(gpr_pool.begin());
     }
     for (const auto& result : linear_ir.get_results()) {
-        manually_assigned[result->get_input_port_descriptor(0)->get_reg()] = Reg(RegType::gpr, io_index);
+        const auto& assigned = *gpr_pool.begin();
+        manually_assigned[result->get_input_port_descriptor(0)->get_reg()] = assigned;
         // shape infer ops sequence before result
         const auto& shape_infer_sources = utils::get_first_parent_shape_infer_expr_seq(result);
         for (const auto& parent_shape_infer_expr : shape_infer_sources) {
-            manually_assigned[parent_shape_infer_expr->get_input_port_descriptor(0)->get_reg()] = Reg(RegType::gpr, io_index);
+            manually_assigned[parent_shape_infer_expr->get_input_port_descriptor(0)->get_reg()] = assigned;
         }
-        io_index++;
+        gpr_pool.erase(gpr_pool.begin());
     }
 
-    auto accumulator_reg = 0lu;
-    const auto reg_buffer_idx_offset = linear_ir.get_parameters().size() + linear_ir.get_results().size();
+    long int max_buffer_group = -1;
     for (const auto& expr : linear_ir.get_ops()) {
         auto op = expr->get_node();
         if (const auto& buffer = ov::as_type_ptr<BufferExpression>(expr)) {
             // All buffers have one common data pointer
-            const auto reg_idx = reg_buffer_idx_offset + buffer->get_reg_group();
+            const auto reg_group = static_cast<long int>(buffer->get_reg_group());
+            max_buffer_group = std::max(max_buffer_group, reg_group);
+            const auto& assigned = *std::next(gpr_pool.begin(), reg_group);
             for (const auto& input : expr->get_input_port_descriptors()) {
-                manually_assigned[input->get_reg()] = Reg(RegType::gpr, reg_idx);
+                manually_assigned[input->get_reg()] = assigned;
                 // shape infer ops in the middle of subgraph. Buffer is inserted before reshape as new loop should start.
                 // child shape info ops share the same memory as Buffer.
                 const auto& shape_infer_consumers = utils::get_first_child_shape_infer_expr_seq(expr);
                 for (const auto& child_shape_infer_expr : shape_infer_consumers) {
                     manually_assigned[child_shape_infer_expr->get_input_port_descriptor(0)->get_reg()] =
-                    manually_assigned[child_shape_infer_expr->get_output_port_descriptor(0)->get_reg()] =
-                            Reg(RegType::gpr, reg_idx);
+                    manually_assigned[child_shape_infer_expr->get_output_port_descriptor(0)->get_reg()] = assigned;
                 }
             }
-            manually_assigned[expr->get_output_port_descriptor(0)->get_reg()] = Reg(RegType::gpr, reg_idx);
+            manually_assigned[expr->get_output_port_descriptor(0)->get_reg()] = assigned;
         } else if (ov::is_type<op::HorizonMax>(op) || ov::is_type<op::HorizonSum>(op)) {
             // Only in ReduceDecomposition Reduce ops use HorizonMax/HorizonSum and VectorBuffer.
             // We should manually set the one vector register for VectorBuffer and Max/Sum output to simulate a accumulator
             // TODO [96351]: We should rewrite accumulator pattern using another way
             const auto& input_tensor = expr->get_input_port_connector(0);
             const auto& input = input_tensor->get_source();
+            const auto& assigned = *vec_pool.begin();
             for (const auto& tensor : input.get_expr()->get_input_port_connectors()) {
                 const auto parent = tensor->get_source();
                 const auto parent_expr = parent.get_expr();
                 if (ov::is_type<op::Fill>(parent_expr->get_node())) {
                     if (ov::is_type<op::VectorBuffer>(parent_expr->get_input_port_connector(0)->get_source().get_expr()->get_node())) {
-                        manually_assigned[parent.get_descriptor_ptr()->get_reg()] = Reg(RegType::vec, accumulator_reg);
-                        manually_assigned[parent_expr->get_input_port_descriptor(0)->get_reg()] = Reg(RegType::vec, accumulator_reg);
+                        manually_assigned[parent.get_descriptor_ptr()->get_reg()] =
+                        manually_assigned[parent_expr->get_input_port_descriptor(0)->get_reg()] = assigned;
                     }
                 }
             }
-            manually_assigned[input.get_descriptor_ptr()->get_reg()] = Reg(RegType::vec, accumulator_reg);
-            accumulator_reg++;
+            manually_assigned[input.get_descriptor_ptr()->get_reg()] = assigned;
+            vec_pool.erase(vec_pool.begin());
         }
     }
+    gpr_pool.erase(gpr_pool.begin(), std::next(gpr_pool.begin(), max_buffer_group + 1));
     return manually_assigned;
 }
 
@@ -95,7 +98,15 @@ bool AssignRegisters::run(LinearIR& linear_ir) {
     OV_ITT_SCOPED_TASK(ov::pass::itt::domains::SnippetsTransform, "Snippets::AssignRegisters")
 
     const auto& exprs = linear_ir.get_ops();
-    auto assigned_reg_map = assign_regs_manually(linear_ir);
+
+    std::set<Reg> gpr_pool;
+    for (size_t idx = 0; idx < m_reg_manager.get_gp_reg_count(); idx++)
+        gpr_pool.insert(Reg(RegType::gpr, idx));
+    std::set<Reg> vec_pool;
+    for (size_t idx = 0; idx < m_reg_manager.get_vec_reg_count(); idx++)
+        vec_pool.insert(Reg(RegType::vec, idx));
+
+    auto assigned_reg_map = assign_regs_manually(linear_ir, gpr_pool, vec_pool);
 
     struct by_starting {
         auto operator()(const LiveInterval& lhs, const LiveInterval& rhs) const -> bool {
@@ -109,18 +120,15 @@ bool AssignRegisters::run(LinearIR& linear_ir) {
         }
     };
 
-    // override live range for manually assigned registers
-    const auto first = linear_ir.begin()->get()->get_exec_num();
-    const auto last = linear_ir.rbegin()->get()->get_exec_num();
-    for (auto reg_manreg : assigned_reg_map)
-        m_reg_manager.set_live_range(reg_manreg.first, {first, last}, true);
-
     // A variable live LiveInterval - is a range (start, stop) of op indexes, such that
     // the variable is alive within this range (defined but not used by the last user)
     std::map<LiveInterval, Reg, by_starting> live_intervals_vec, live_intervals_gpr;
     for (const auto& regint : m_reg_manager.get_live_range_map()) {
         const auto& reg = regint.first;
         const auto& interval = regint.second;
+        // If a register is assigned manually, we should ignore it during automatic assignment
+        if (assigned_reg_map.count(reg))
+            continue;
         switch (reg.type) {
             case (RegType::gpr):
                 OPENVINO_ASSERT(!live_intervals_gpr.count(interval), "GPR live interval is already in the map");
@@ -132,26 +140,10 @@ bool AssignRegisters::run(LinearIR& linear_ir) {
                 break;
             case (RegType::undefined):
             default:
-                OPENVINO_THROW("Unhabdler register type");
+                OPENVINO_THROW("Unhandled register type");
         }
     }
 
-    OV_ITT_SCOPE_NEXT(FIRST_INFERENCE, taskChain, "Pools");
-    // todo: vec_/gpr_pool are hardware-specific and should be provided by a backend, e.g. overloaded generator
-    std::set<Reg> vec_pool, gpr_pool;
-    std::set<Reg> assigned;
-    for (const auto& reg_manreg : assigned_reg_map)
-        assigned.insert(reg_manreg.second);
-    for (size_t i = 0; i < reg_count; i++) {
-        const auto vacant_vec = Reg(RegType::vec, i);
-        if (assigned.count(vacant_vec) == 0)
-            vec_pool.insert(vacant_vec);
-        const auto vacant_gpr = Reg(RegType::gpr, i);
-        if (assigned.count(vacant_gpr) == 0)
-            gpr_pool.insert(vacant_gpr);
-    }
-
-    OV_ITT_SCOPE_NEXT(FIRST_INFERENCE, taskChain, "Assignment");
     auto linescan_assign_registers = [](const decltype(live_intervals_vec)& live_intervals,
                                         const std::set<Reg>& reg_pool) {
         // http://web.cs.ucla.edu/~palsberg/course/cs132/linearscan.pdf

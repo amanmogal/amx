@@ -22,16 +22,14 @@ namespace pass {
 class AssignRegisters : public Pass {
 public:
     OPENVINO_RTTI("AssignRegisters", "Pass")
-    explicit AssignRegisters(RegManager& reg_manager, const size_t reg_cnt)
-                            : m_reg_manager(reg_manager), reg_count(reg_cnt) {}
+    explicit AssignRegisters(RegManager& reg_manager) : m_reg_manager(reg_manager) {}
     bool run(LinearIR& linear_ir) override;
 
 private:
     using RegMap = std::map<Reg, Reg>;
-    static RegMap assign_regs_manually(const LinearIR& linear_ir);
+    static RegMap assign_regs_manually(const LinearIR& linear_ir, std::set<Reg>& gpr_pool, std::set<Reg>& vec_pool);
 
     RegManager& m_reg_manager;
-    size_t reg_count;
 };
 
 } // namespace pass

@@ -501,10 +501,6 @@ void Subgraph::control_flow_transformations(size_t min_parallel_work_amount, siz
 
     OV_ITT_TASK_NEXT(CONTROL_FLOW, "::pre_generation_pipeline")
 
-    std::function<RegType(const ov::Output<Node>& out)> reg_type_mapper = [&](const ov::Output<Node>& out) -> RegType {
-        return get_generator()->get_op_out_reg_type(out);
-    };
-
     lowered::pass::PassPipeline gen_pipeline(lowered_pass_config);
     // Note: the order of all passes in this pipeline must not be changed since they have hard dependencies
     //    1. InsertSpecificIterations must be called after AssignRegisters since tail loop expressions must have the same
@@ -514,9 +510,9 @@ void Subgraph::control_flow_transformations(size_t min_parallel_work_amount, siz
     //    3. OptimizeLoopSingleEvaluation must be called after CleanupLoopOffsets
     //       since CleanupLoopOffsets can't handle loops with evaluate_once = true
 
-    lowered::RegManager reg_manager(reg_type_mapper);
+    lowered::RegManager reg_manager(get_generator());
     gen_pipeline.register_pass<lowered::pass::InitLiveRanges>(reg_manager);
-    gen_pipeline.register_pass<lowered::pass::AssignRegisters>(reg_manager, get_generator()->get_target_machine()->get_reg_count());
+    gen_pipeline.register_pass<lowered::pass::AssignRegisters>(reg_manager);
     gen_pipeline.register_pass<lowered::pass::InsertSpecificIterations>();
     gen_pipeline.register_pass<lowered::pass::NormalizeLoopIDs>();
     gen_pipeline.register_pass<lowered::pass::ValidateExpandedLoops>();
