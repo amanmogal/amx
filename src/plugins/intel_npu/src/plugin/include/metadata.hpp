@@ -12,13 +12,13 @@ namespace intel_npu {
 
 constexpr std::string_view MAGIC_BYTES = "OVNPU";
 
-constexpr int CURRENT_METAVERSION_MAJOR = 1;
-constexpr int CURRENT_METAVERSION_MINOR = 0;
+constexpr uint16_t make_version(uint8_t major, uint8_t minor) {
+    return ((0 | major) << sizeof(major) * 8) | minor;
+}
 
-struct MetadataVersion {
-    uint32_t major;
-    uint32_t minor;
-};
+constexpr uint16_t METADATA_VERSION_1_0 { make_version(1, 0) };
+
+constexpr uint16_t CURRENT_METADATA_VERSION { METADATA_VERSION_1_0 };
 
 struct OpenvinoVersion {
     std::string version;
@@ -36,12 +36,12 @@ struct MetadataBase {
     virtual ~MetadataBase() = default;
 };
 
-template <int Major, int Minor>
+template <uint16_t version>
 struct Metadata : public MetadataBase {};
 
 template <>
-struct Metadata<1, 0> : public MetadataBase {
-    MetadataVersion version;
+struct Metadata<METADATA_VERSION_1_0> : public MetadataBase {
+    uint16_t version;
     OpenvinoVersion ovVersion;
 
     Metadata();
@@ -53,7 +53,7 @@ struct Metadata<1, 0> : public MetadataBase {
     bool isCompatible() override;
 };
 
-std::unique_ptr<MetadataBase> createMetadata(int major, int minor);
+std::unique_ptr<MetadataBase> createMetadata(uint16_t version);
 
 std::unique_ptr<MetadataBase> read_metadata_from(std::vector<uint8_t>& blob);
 

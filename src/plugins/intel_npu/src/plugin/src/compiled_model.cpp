@@ -77,7 +77,7 @@ void CompiledModel::export_model(std::ostream& stream) const {
     _logger.debug("CompiledModel::export_model");
     size_t blobSizeBeforeVersioning = _graph->export_blob(stream);
 
-    auto meta = Metadata<CURRENT_METAVERSION_MAJOR, CURRENT_METAVERSION_MINOR>();
+    auto meta = Metadata<CURRENT_METADATA_VERSION>();
     meta.write(stream);
     stream.write(reinterpret_cast<const char*>(&blobSizeBeforeVersioning), sizeof(blobSizeBeforeVersioning));
 

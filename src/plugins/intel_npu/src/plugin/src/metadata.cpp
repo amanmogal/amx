@@ -22,43 +22,35 @@ void OpenvinoVersion::read(std::istream& stream) {
     stream.read(&version[0], size);
 }
 
-Metadata<CURRENT_METAVERSION_MAJOR, 0>::Metadata() : version{CURRENT_METAVERSION_MAJOR, 0}, ovVersion{ov::get_openvino_version().buildNumber} {}
+Metadata<METADATA_VERSION_1_0>::Metadata() : ovVersion{ov::get_openvino_version().buildNumber} { version = METADATA_VERSION_1_0; }
 
-void Metadata<1, 0>::read(std::istream& stream) {
+void Metadata<METADATA_VERSION_1_0>::read(std::istream& stream) {
     ovVersion.read(stream);
 }
 
-void Metadata<1, 0>::write(std::ostream& stream) {
-    stream.write(reinterpret_cast<const char*>(&version.major), sizeof(version.major));
-    stream.write(reinterpret_cast<const char*>(&version.minor), sizeof(version.minor));
+void Metadata<METADATA_VERSION_1_0>::write(std::ostream& stream) {
+    stream.write(reinterpret_cast<const char*>(&version), sizeof(version));
 
     stream.write(reinterpret_cast<const char*>(&ovVersion.size), sizeof(ovVersion.size));
     stream.write(ovVersion.version.c_str(), ovVersion.version.size());
 }
 
-std::unique_ptr<MetadataBase> createMetadata(int major, int minor) {
-    switch (major) {
-    case 1:
-        switch (minor) {
-        case 0:
-            return std::make_unique<Metadata<1, 0>>();
+std::unique_ptr<MetadataBase> createMetadata(uint16_t version) {
+    switch (version) {
+        case METADATA_VERSION_1_0:
+            return std::make_unique<Metadata<METADATA_VERSION_1_0>>();
 
         default:
             return nullptr;
-        }
-
-    default:
-        return nullptr;
     }
 }
 
-bool Metadata<1, 0>::isCompatible() {
+bool Metadata<METADATA_VERSION_1_0>::isCompatible() {
     // checking if we still support the format
-    // but is checking `Major` redundant since it's checked in createMetadata?
-    if (version.major != CURRENT_METAVERSION_MAJOR || version.minor != CURRENT_METAVERSION_MINOR) {
+    if (version != CURRENT_METADATA_VERSION) {
         return false;
     }
-    // Checking if we can import the blob
+    // checking if we can import the blob
     return ovVersion.version == ov::get_openvino_version().buildNumber;
 }
 
@@ -83,11 +75,10 @@ std::unique_ptr<MetadataBase> read_metadata_from(std::vector<uint8_t>& blob) {
     metadataStream.write(reinterpret_cast<const char*>(&(*metadataIterator)),
                          blob.end() - metadataIterator - sizeof(blobDataSize));
 
-    MetadataVersion metaVersion;
-    metadataStream.read(reinterpret_cast<char*>(&metaVersion.major), sizeof(metaVersion.major));
-    metadataStream.read(reinterpret_cast<char*>(&metaVersion.minor), sizeof(metaVersion.minor));
+    uint16_t metaVersion;
+    metadataStream.read(reinterpret_cast<char*>(&metaVersion), sizeof(metaVersion));
 
-    auto storedMeta = createMetadata(metaVersion.major, metaVersion.minor);
+    auto storedMeta = createMetadata(metaVersion);
     if (storedMeta != nullptr) {
         storedMeta->read(metadataStream);
     }
