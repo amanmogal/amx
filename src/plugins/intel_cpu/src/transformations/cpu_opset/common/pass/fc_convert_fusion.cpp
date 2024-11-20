@@ -31,7 +31,6 @@ FcConvertFusion::FcConvertFusion() {
         const auto& m_a = pattern_map.at(a).get_node_shared_ptr();
         const auto& m_b = pattern_map.at(b).get_node_shared_ptr();
         const auto& m_fc = pattern_map.at(fc).get_node_shared_ptr();
-        
         const auto& m_convert = pattern_map.at(convert).get_node_shared_ptr();
         auto output_type = m_convert->get_output_element_type(0);
 

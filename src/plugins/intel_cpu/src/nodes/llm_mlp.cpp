@@ -123,7 +123,6 @@ public:
              const LLMMLPNode::Config& config,
              MatrixDynQuantPerRow& src_dq,
              float * w_scale) {
-        // static ReduceAdd2bh jit_reduce2cvt(true, std::is_same<T, ov::float16>::value);
         static ReduceAdd2bh jit_reduce2cvt(true, std::is_same<T, ov::float16>::value, config.tail_f32);
 
         ov::parallel_nt_static(m_threads_num, [&](const size_t ithr, const size_t nthr) {
@@ -439,8 +438,6 @@ struct LLMMLP::Executor : public LLMMLP::ExecutorBase {
         int M = shape_size(ishape) / ishape[ishape.size() - 1];
 
         auto output = m_pnode->getDstMemoryAtPort(0);
-        auto out_prec = output->getPrecision();
-        // need to cast to target precision
         auto* dstC = output->getDataAs<U>();
         const auto& dstStrides = output->getDescWithType<BlockedMemoryDesc>()->getStrides();
         int strideC = dstStrides[dstStrides.size() - 2] * sizeof(U);
