@@ -94,8 +94,6 @@ private:
     std::size_t total_subrequests() const override;
     bool supports_async_pipeline() const override;
 
-    void update_subrequest_links(std::size_t idx) override;
-
     ////////////////////////////////////
     // now own API
 
@@ -108,9 +106,9 @@ private:
     void function_prologue(std::size_t idx);
     void unpack_closure(std::size_t idx, RqPtr request);
 
-    void unsafe_during(std::size_t real_idx, const std::function<void()>& f);
-    void unsafe_infer(std::size_t real_idx);
-    void unsafe_run_this_prep_next(std::size_t idx, bool& next_prepared_p);
+    void unsafe_during(std::size_t idx, const std::function<void()>& f, bool& accuracy_failover);
+    void unsafe_infer(std::size_t idx, bool& accuracy_failover);
+    void unsafe_run_this_prep_next(std::size_t idx, bool& next_prepared, bool& accuracy_failover);
 
     void connect_subrequests();
     void recreate_subrequests(std::size_t idx);
@@ -150,9 +148,6 @@ private:
     std::vector<GlobalIO> m_subrequests_gio;
 
     std::unordered_set<void*> m_input_allocated;
-
-    // Represents spatial run-time info
-    runtime::spatial::Selector::Ptr m_spatial_selector;
 
     // Cached check if we do FOLDing and need to update closures in the repeating blocks
     bool m_closure_update_required = false;
