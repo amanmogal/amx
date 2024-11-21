@@ -112,6 +112,7 @@ enum class Type {
     ExperimentalDetectronGenerateProposalsSingleImage,
     ExtractImagePatches,
     GenerateProposals,
+    Identity,
     Inverse,
     NonMaxSuppression,
     MatrixNms,
