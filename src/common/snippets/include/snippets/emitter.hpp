@@ -16,7 +16,7 @@ namespace snippets {
  * @interface RegType
  * @brief Register type of input and output operations
  */
-enum class RegType { gpr, vec, undefined };
+enum class RegType { gpr, vec, mask, undefined };
 /**
  * @interface Reg
  * @brief Register representation: type of register and index

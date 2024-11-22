@@ -29,6 +29,8 @@ std::ostream& operator<<(std::ostream& s, const Reg& r) {
                 return "vec";
             case RegType::gpr:
                  return "gpr";
+            case RegType::mask:
+                return "mask";
             case RegType::undefined:
                  return "undefined";
             default:

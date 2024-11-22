@@ -5,14 +5,16 @@
 #pragma once
 
 #include "cpu/x64/jit_generator.hpp"
+#include "snippets/emitter.hpp"
 
 namespace ov {
 namespace intel_cpu {
 
 // The class emit register spills for the possible call of external binary code
+template<dnnl::impl::cpu::x64::cpu_isa_t isa>
 class EmitABIRegSpills {
 public:
-    EmitABIRegSpills(dnnl::impl::cpu::x64::jit_generator* h);
+    EmitABIRegSpills(dnnl::impl::cpu::x64::jit_generator* h, const std::set<snippets::Reg>& live_regs = {});
     ~EmitABIRegSpills();
 
     // push (save) all registers on the stack
@@ -28,21 +30,22 @@ public:
 private:
     EmitABIRegSpills() = default;
 
-    static dnnl::impl::cpu::x64::cpu_isa_t get_isa();
-
-    inline size_t get_max_vecs_count() const { return dnnl::impl::cpu::x64::isa_num_vregs(isa); }
-    inline size_t get_vec_length() const { return dnnl::impl::cpu::x64::isa_max_vlen(isa); }
-
     dnnl::impl::cpu::x64::jit_generator* h {nullptr};
-    const dnnl::impl::cpu::x64::cpu_isa_t isa {dnnl::impl::cpu::x64::cpu_isa_t::isa_undef};
 
-    static constexpr int k_mask_size = 8;
-    static constexpr int k_mask_num = 8;
-    static constexpr int gpr_size = 8;
+    std::vector<Xbyak::Reg> m_regs_to_spill;
+    uint32_t m_bytes_to_spill = 0;
+    using Vmm = typename dnnl::impl::cpu::x64::cpu_isa_traits<isa>::Vmm;
 
     bool spill_status = true;
     bool rsp_status = true;
 };
+
+get_EmitABIRegSpills() {
+    if (dnnl::impl::cpu::x64::mayiuse(avx512_core)) return avx512_core;
+    if (mayiuse(avx2)) return avx2;
+    if (mayiuse(sse41)) return sse41;
+    OV_CPU_JIT_EMITTER_THROW("unsupported isa");
+}
 
 }   // namespace intel_cpu
 }   // namespace ov

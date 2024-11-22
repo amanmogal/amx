@@ -17,9 +17,9 @@
 #include <iterator>
 
 // todo:
-//  1. Move set_reg_types to a separate pass
-//  2. Modify set_reg_types, so it stores a set of live regs for every expression
-//  3. Implement abstract to physical mapping as a separate backend-specific pass
+//  1. Move set_reg_types to a separate pass => Ok
+//  2. Modify set_reg_types, so it stores a set of live regs for every expression => Ok
+//  3. Implement abstract to physical mapping as a separate backend-specific pass => Investigation needed
 
 namespace ov {
 namespace snippets {
@@ -183,9 +183,11 @@ bool AssignRegisters::run(LinearIR& linear_ir) {
     const auto& map_gpr = linescan_assign_registers(live_intervals_gpr, gpr_pool);
     assigned_reg_map.insert(map_gpr.begin(), map_gpr.end());
 
-    OV_ITT_SCOPE_NEXT(FIRST_INFERENCE, taskChain, "Postprocessing");
-
     for (const auto& expr : exprs) {
+        std::set<Reg> mapped_live_regs;
+        for (const auto& live_reg : m_reg_manager.get_live_regs(expr))
+            mapped_live_regs.insert(assigned_reg_map[live_reg]);
+        m_reg_manager.set_live_regs(expr, std::move(mapped_live_regs), true);
         for (const auto& in : expr->get_input_port_descriptors())
             in->set_reg(assigned_reg_map[in->get_reg()]);
         for (const auto& out : expr->get_output_port_descriptors())
