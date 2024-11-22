@@ -450,10 +450,9 @@ void Subgraph::initSupportedPrimitiveDescriptors() {
         for (size_t i = 0; i < inputShapes.size(); i++) {
             const auto originalInputPrecision = getOriginalInputPrecisionAtPort(i);
             const auto precision = ((originalInputPrecision == ov::element::f32) &&
-                                     context->getConfig().inferencePrecision == ov::element::bf16 &&
+                                    one_of(context->getConfig().inferencePrecision, ov::element::bf16, ov::element::f16) &&
                                      subgraph_attrs->snippet->has_domain_sensitive_ops()) ?
-                static_cast<ov::element::Type>(ov::element::bf16) :
-                originalInputPrecision;
+                                     context->getConfig().inferencePrecision : originalInputPrecision;
             if (supportedPrecisions.count(precision) == 0)
                 OPENVINO_THROW("Subgraph node with name `", getName(), "` doesn't support ", precision, " precision.");
 
@@ -638,13 +637,13 @@ Subgraph::DataFlowPasses Subgraph::getDataFlowPasses() {
     SNIPPETS_REGISTER_PASS_ABSOLUTE_COMMON(Place::PipelineStart, ConvertToSwishCPU);
     SNIPPETS_REGISTER_PASS_RELATIVE_COMMON(Place::After, ov::snippets::pass::Canonicalization,
                                            ov::snippets::pass::AnalyzeBroadcastableInputs, broadcastable_inputs);
-    if (context->getConfig().inferencePrecision == ov::element::bf16 && subgraph_attrs->snippet->has_domain_sensitive_ops()) {
+    if (one_of(context->getConfig().inferencePrecision, ov::element::bf16, ov::element::f16) && subgraph_attrs->snippet->has_domain_sensitive_ops()) {
         // enforce BF16 precisions to supported operations
         // MatMul has to be decomposed to Brgemm operations before enforcement
         // Note, MatMul decomposition will be run later again for case if BF16 enforcement is not happened
         SNIPPETS_REGISTER_PASS_ABSOLUTE_X86_64(Place::PipelineStart, ov::snippets::pass::MatMulToBrgemm);
         SNIPPETS_REGISTER_PASS_RELATIVE_X86_64(Place::After, ov::snippets::pass::MatMulToBrgemm,
-                                               pass::EnforcePrecision, element::f32, element::bf16);
+                                               pass::EnforcePrecision, element::f32, context->getConfig().inferencePrecision);
     }
     SNIPPETS_REGISTER_PASS_RELATIVE_X86_64(Place::Before, ov::snippets::pass::PropagatePrecision,
                                            ov::intel_cpu::pass::BrgemmToBrgemmCPU);

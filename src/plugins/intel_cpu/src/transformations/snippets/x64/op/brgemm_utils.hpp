@@ -16,9 +16,9 @@ namespace brgemm_utils {
 
 enum class BRGEMM_TYPE {
     STAND_ALONE,            // No extra requirements, used for f32|f32
-    WITH_AMX,               // i8|i8 or bf16|bf16 on AMX system - needs BrgemmCopyB and scratchpad
+    WITH_AMX,               // i8|i8 or bf16|bf16 on AMX system or fp16|fp16 on AMX_FP16 system - needs BrgemmCopyB and scratchpad
     WITH_COMPENSATIONS,     // i8|i8 (non-AMX system) - needs BrgemmCopyB for data repacking and compensations
-    REPACKING_ONLY          // u8|i8 or bf16|bf16 (non-AMX system) - needs BrgemmCopyB on second input for data repacking
+    REPACKING_ONLY,         // u8|i8 or bf16|bf16 (non-AMX system) - needs BrgemmCopyB on second input for data repacking
 };
 
 dnnl::impl::cpu::x64::cpu_isa_t get_primitive_isa(const ov::element::Type& dt_in0, bool is_with_amx);

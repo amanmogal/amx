@@ -137,6 +137,32 @@ INSTANTIATE_TEST_SUITE_P(smoke_Snippets_MHAEnforceBF16,
                                             ::testing::Values(CPUTestUtils::cpu_bf16_plugin_config)),
                          MHA::getTestCaseName);
 
+INSTANTIATE_TEST_SUITE_P(smoke_Snippets_MHA_FP16_4D,
+                         MHA,
+                         ::testing::Combine(::testing::ValuesIn(transposedShape_4D(false)),
+                                            ::testing::ValuesIn(precision_fp16_if_supported(4)),
+                                            ::testing::Values(ov::element::f16),
+                                            ::testing::ValuesIn({false, true}),
+                                            ::testing::Values(MHA::default_thread_count),
+                                            ::testing::Values(2),
+                                            ::testing::Values(1),
+                                            ::testing::Values(ov::test::utils::DEVICE_CPU),
+                                            ::testing::Values(CPUTestUtils::empty_plugin_config)),
+                         MHA::getTestCaseName);
+
+INSTANTIATE_TEST_SUITE_P(smoke_Snippets_MHAEnforceFP16,
+                         MHA,
+                         ::testing::Combine(::testing::ValuesIn(transposedShape_4D(false)),
+                                            ::testing::ValuesIn(precision_f32(4)),
+                                            ::testing::Values(ov::element::f16),
+                                            ::testing::ValuesIn({false, true}),
+                                            ::testing::Values(MHA::default_thread_count),
+                                            ::testing::Values(2),
+                                            ::testing::Values(1),
+                                            ::testing::Values(ov::test::utils::DEVICE_CPU),
+                                            ::testing::Values(CPUTestUtils::cpu_f16_plugin_config)),
+                         MHA::getTestCaseName);
+
 }  // namespace
 }  // namespace snippets
 }  // namespace test
