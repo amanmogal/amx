@@ -28,8 +28,10 @@ bool InitLiveRanges::run(LinearIR& linear_ir) {
             || ov::is_type<op::PerfCountBeginBase>(op)
             || ov::is_type<op::PerfCountEndBase>(op)
 #endif
-            )
+            ) {
+            m_reg_manager.set_live_regs(expr, {});
             continue;
+        }
         OPENVINO_ASSERT(expr->get_output_count() == op->get_output_size(), "Incorrect count of output port descriptors!");
         const double start = expr->get_exec_num();
         // Remove all regs that expired before start

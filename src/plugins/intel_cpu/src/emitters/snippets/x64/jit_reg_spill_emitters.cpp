@@ -44,8 +44,7 @@ void jit_reg_spill_begin_emitter::emit_code(const std::vector<size_t> &in, const
 void jit_reg_spill_begin_emitter::emit_impl(const std::vector<size_t>& in, const std::vector<size_t>& out) const {
     const auto& reg_info = m_reg_spill_begin_expr->get_reg_info();
     OPENVINO_ASSERT(reg_info.second.empty(), "Out regs should be empty for reg_spill_begin emitter");
-    m_abi_reg_spiller->limit_to_live_regs({reg_info.first.begin(), reg_info.first.end()});
-    m_abi_reg_spiller->preamble();
+    m_abi_reg_spiller->preamble({reg_info.first.begin(), reg_info.first.end()});
 }
 
 /* ============================================================== */

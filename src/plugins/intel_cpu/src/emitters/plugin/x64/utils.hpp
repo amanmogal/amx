@@ -14,12 +14,10 @@ namespace intel_cpu {
 class EmitABIRegSpills {
 public:
     EmitABIRegSpills(dnnl::impl::cpu::x64::jit_generator* h);
-
-    void limit_to_live_regs(const std::set<snippets::Reg>& live_regs );
     ~EmitABIRegSpills();
 
     // push (save) all registers on the stack
-    void preamble();
+    void preamble(const std::set<snippets::Reg>& live_regs = {});
     // pop (take) all registers from the stack
     void postamble();
 
