@@ -26,7 +26,7 @@ public:
     inline RegType get_reg_type(const ov::Output<Node>& out) const { return m_generator->get_op_out_reg_type(out); }
     inline size_t get_gp_reg_count() const { return m_generator->get_target_machine()->get_gp_reg_count(); }
     inline size_t get_vec_reg_count() const { return m_generator->get_target_machine()->get_vec_reg_count(); }
-    inline bool need_abi_reg_spill() const {m_generator->uses}
+//    inline bool need_abi_reg_spill() const {m_generator->}
     inline void set_live_regs(const ExpressionPtr& expr, std::set<Reg>&& live, bool force = false) {
         OPENVINO_ASSERT(force || m_live_reg.count(expr) == 0, "Live regs for this expression already registered");
         m_live_reg.insert({expr, live});
