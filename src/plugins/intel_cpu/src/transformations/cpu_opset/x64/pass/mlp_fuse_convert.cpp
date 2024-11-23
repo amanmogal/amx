@@ -34,6 +34,12 @@ intel_cpu::MLPFuseConvert::MLPFuseConvert() {
             return false;
         }
 
+        const auto out = mlp_node->outputs();
+        const bool has_only_child = (out.size() == 1) && (out[0].get_target_inputs().size() == 1);
+        if (!has_only_child) {
+            return false;
+        }
+
         OutputVector args = mlp_node->get_args();
         auto cfg = mlp_node->get_config();
 

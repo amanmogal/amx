@@ -31,6 +31,18 @@ FcConvertFusion::FcConvertFusion() {
         const auto& m_a = pattern_map.at(a).get_node_shared_ptr();
         const auto& m_b = pattern_map.at(b).get_node_shared_ptr();
         const auto& m_fc = pattern_map.at(fc).get_node_shared_ptr();
+
+        if (!one_of(m_a->get_output_element_type(0), ov::element::f16, ov::element::bf16, ov::element::f32) &&
+            !one_of(m_b->get_output_element_type(0), ov::element::f16, ov::element::bf16, ov::element::f32)) {
+            return false;
+        }
+
+        const auto out = m_fc->outputs();
+        const bool has_only_child = (out.size() == 1) && (out[0].get_target_inputs().size() == 1);
+        if (!has_only_child) {
+            return false;
+        }
+
         const auto& m_convert = pattern_map.at(convert).get_node_shared_ptr();
         auto output_type = m_convert->get_output_element_type(0);
 
