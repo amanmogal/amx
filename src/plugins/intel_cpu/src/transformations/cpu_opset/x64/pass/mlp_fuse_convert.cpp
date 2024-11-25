@@ -21,7 +21,7 @@ intel_cpu::MLPFuseConvert::MLPFuseConvert() {
     auto mlp = wrap_type<ov::intel_cpu::LLMMLPNode>();
     auto convert = wrap_type<ov::op::v0::Convert>({mlp}, type_matches(ov::element::f32));
 
-    matcher_pass_callback callback = [OV_CAPTURE_CPY_AND_THIS](pass::pattern::Matcher& m) {
+    matcher_pass_callback callback = [=](pass::pattern::Matcher& m) {
         auto& pattern_map = m.get_pattern_value_map();
         const auto& m_mlp = pattern_map.at(mlp).get_node_shared_ptr();
         const auto& m_cvt = pattern_map.at(convert).get_node_shared_ptr();
