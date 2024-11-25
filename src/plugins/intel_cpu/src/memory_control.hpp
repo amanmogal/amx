@@ -48,7 +48,7 @@ public:
     void releaseMemory();
 
 private:
-    explicit MemoryControl();
+    MemoryControl();
     void insert(const MemoryRegion& region, const std::vector<size_t>& syncInds);
 
     friend class NetworkMemoryControl;

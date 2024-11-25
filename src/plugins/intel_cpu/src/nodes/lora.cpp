@@ -52,7 +52,7 @@ void LoRA::selectOptimalPrimitiveDescriptor() {
 
     inConfs.emplace_back(mainInputDesc);
 
-    const bool isInPlace = true;
+    constexpr bool isInPlace = true;
     graphInputConfig.emplace_back(node::Input::InputConfig{mainInputDesc, isInPlace});
 
     for (size_t i = 1; i < getParentEdges().size(); i++) {

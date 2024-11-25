@@ -114,7 +114,6 @@ public:
 
     bool hasZeroInputDims() const {
         const auto& inputConfigs = getConfig().inConfs;
-
         return std::any_of(inputConfigs.begin(), inputConfigs.end(), [](const PortConfig& portConfig) {
             return portConfig.hasZeroDims();
         });
@@ -122,13 +121,13 @@ public:
 
     bool hasZeroInputDimsAtPort(size_t portIdx) const {
         const auto& inputConfigs = getConfig().inConfs;
-        OPENVINO_ASSERT("Attempt to get NodeDesc input configuration for port " , portIdx, ". Number of inputs is ", inputConfigs.size());
+        OPENVINO_ASSERT(portIdx < inputConfigs.size(), "Attempt to get NodeDesc input configuration for port ",
+                        portIdx, ". Number of inputs is ", inputConfigs.size());
         return inputConfigs[portIdx].hasZeroDims();
     }
 
     bool hasZeroOutputDims() const {
         const auto& outputConfigs = getConfig().outConfs;
-
         return std::any_of(outputConfigs.begin(), outputConfigs.end(), [](const PortConfig& portConfig) {
             return portConfig.hasZeroDims();
         });
@@ -136,7 +135,8 @@ public:
 
     bool hasZeroOutputDimsAtPort(size_t portIdx) const {
         const auto& outputConfigs = getConfig().outConfs;
-        OPENVINO_ASSERT("Attempt to get NodeDesc output configuration for port " , portIdx, ". Number of outputs is ", outputConfigs.size());
+        OPENVINO_ASSERT(portIdx < outputConfigs.size(), "Attempt to get NodeDesc output configuration for port ",
+                        portIdx, ". Number of outputs is ", outputConfigs.size());
         return outputConfigs[portIdx].hasZeroDims();
     }
 

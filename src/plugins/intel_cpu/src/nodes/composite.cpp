@@ -42,7 +42,7 @@ void Composite::selectOptimalPrimitiveDescriptor() {
     std::vector<PortConfig> inConfs;
     std::vector<Input::InputConfig> graphInputConfig;
 
-    const bool isInPlace = true;
+    constexpr bool isInPlace = true;
 
     for (size_t i = 0; i < getParentEdges().size(); i++) {
         auto desc = getParentOutputMemDesc(getParentEdgeAt(i));
@@ -82,7 +82,7 @@ int Composite::registerToAllocationContext(int offset, AllocationContext& contex
         auto inputEdges = m_graph.GetInputNodesMap().at(i)->getChildEdgesAtPort(0);
         for (const auto& inputEdge : inputEdges) {
             OPENVINO_ASSERT(inputEdge->getStatus() == Edge::Status::Uninitialized,
-                            "Expected Uninitialized state for edge: ", inputEdge->name());
+                            "Expected Uninitialized state for edge: ", *this);
             inputEdge->sharedMemFrom(parentEdge);
         }
     }
@@ -91,7 +91,7 @@ int Composite::registerToAllocationContext(int offset, AllocationContext& contex
         auto childEdge = getChildEdgeAt(i);
         auto outputEdge = m_graph.GetOutputNodesMap().at(i)->getParentEdgeAt(0);
         OPENVINO_ASSERT(outputEdge->getStatus() == Edge::Status::Uninitialized,
-                        "Expected Uninitialized state for edge: ", outputEdge->name());
+                        "Expected Uninitialized state for edge: ", *outputEdge);
         outputEdge->sharedMemFrom(childEdge);
     }
 

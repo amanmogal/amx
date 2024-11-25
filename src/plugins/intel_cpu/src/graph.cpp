@@ -717,25 +717,6 @@ void Graph::ResolveComplexInplaceConflicts() {
  */
 static size_t AllocateStringsAndConstants(EdgeClusters& clusters,
                                           const GraphContext::CPtr context) {
-    auto allocateStringMemory = [context](const EdgePtr& edge) {
-        if (edge->getParent()->isConstant()) {
-            if (edge->getParent()->getType() == Type::Input) {
-                auto constNode = static_cast<node::Input *>(edge->getParent().get());
-                edge->reuse(std::const_pointer_cast<IMemory>(constNode->getMemoryPtr()));
-            } else {
-                edge->externalAllocate(context->getWeightsCache());
-            }
-            auto stringMemory = dynamic_cast<StringMemory *>(edge->getMemoryPtr().get());
-            OPENVINO_ASSERT(stringMemory, "[CPU] Edge between nodes '",
-                            edge->getParent()->getName(), "' and '", edge->getChild()->getName(), "' must have StringMemory.");
-            return stringMemory->getStringMemoryBlockPtr();
-        }
-
-        auto memory = std::make_shared<StringMemory>(context->getEngine(), edge->getDesc());
-        edge->reuse(memory);
-        return memory->getStringMemoryBlockPtr();
-    };
-
     auto allocateConstantEdge = [context](const EdgePtr& edge) {
         if (edge->getParent()->getType() == Type::Input) {
             auto constNode = std::static_pointer_cast<node::Input>(edge->getParent());
@@ -743,6 +724,12 @@ static size_t AllocateStringsAndConstants(EdgeClusters& clusters,
         } else {
             edge->externalAllocate(context->getWeightsCache());
         }
+    };
+
+    auto allocateStringMemory = [context](const EdgePtr& edge) {
+        auto memory = std::make_shared<StringMemory>(context->getEngine(), edge->getDesc());
+        edge->reuse(memory);
+        return memory->getStringMemoryBlockPtr();
     };
 
     auto notAllocatedPartitionEnd =
@@ -766,7 +753,18 @@ static size_t AllocateStringsAndConstants(EdgeClusters& clusters,
                                return true;
                            }
 
-                           // Allocate a string cluster
+                           // Allocate a cluster of the constants
+                           if (baseEdge->getParent()->isConstant()) {
+                               // @todo can we add some meaningful assert here?
+                               for (auto &edge : cluster) {
+                                   if (edge->getParent()->isConstant() && edge->getStatus() == Edge::Status::NeedAllocation) {
+                                       allocateConstantEdge(edge);
+                                   }
+                               }
+                               return false;
+                           }
+
+                           // Allocate a non-constant string cluster
                            if (baseEdge->getDesc().getPrecision() == element::string) {
                                OPENVINO_ASSERT(std::all_of(cluster.begin(), cluster.end(),
                                                            [](const EdgePtr& edge) {
@@ -776,17 +774,6 @@ static size_t AllocateStringsAndConstants(EdgeClusters& clusters,
                                for (auto &edge : cluster) {
                                    if (edge->getStatus() == Edge::Status::NotAllocated) {
                                        edge->reuse(std::make_shared<StringMemory>(context->getEngine(), edge->getDesc(), memBlock));
-                                   }
-                               }
-                               return false;
-                           }
-
-                           // Allocate a constant cluster
-                           if (baseEdge->getParent()->isConstant()) {
-                               // @todo can we add some meaningful assert here?
-                               for (auto &edge : cluster) {
-                                   if (edge->getParent()->isConstant() && edge->getStatus() == Edge::Status::NeedAllocation) {
-                                       allocateConstantEdge(edge);
                                    }
                                }
                                return false;
@@ -932,13 +919,13 @@ static void ValidateEdgeStatus(const std::vector<EdgePtr>& edges) {
 
 /**
  * Forms clusters of edges.
- * An edge cluster is a collection of edges, so:
+ * An edge cluster is a collection of edges, with the following properties:
  * - base edge is an edge with a Memory which other edges point to by means of inplace logic
  * - first edge of a cluster is a base edge with a status either NeedAllocation or Allocated
- * - rest of the edges in a cluster are NotAllocated ones, since they point to their base edge
+ * - rest of the edges in a cluster are NotAllocated ones, since they point to another edge
  */
 static EdgeClusters FormEdgeClusters(const std::vector<EdgePtr>& graphEdges) {
-    typedef std::unordered_map<EdgePtr, size_t> EdgeClusterIdxMap;
+    using EdgeClusterIdxMap = std::unordered_map<EdgePtr, size_t>;
     EdgeClusters edgeClusters;
     EdgeClusterIdxMap edgeClusterIndices;
 
@@ -1058,10 +1045,10 @@ static MemoryRegions FormMemoryRegions(const EdgeClusters& clusters,
     return memoryRegions;
 }
 
-static OutputMemoryBlocks FilterOutDynamicOutputEdges(MemoryRegions& memoryRegions,
-                                                      const EdgeClusters& clusters,
-                                                      const std::map<std::size_t, NodePtr>& outputNodes) {
-    OutputMemoryBlocks outputMemBlocks;
+static Graph::OutputMemoryBlocks FilterOutDynamicOutputEdges(MemoryRegions& memoryRegions,
+                                                             const EdgeClusters& clusters,
+                                                             const std::map<std::size_t, NodePtr>& outputNodes) {
+    Graph::OutputMemoryBlocks outputMemBlocks;
     memoryRegions.erase(std::remove_if(memoryRegions.begin(), memoryRegions.end(), [&](const MemoryRegion& region) {
         if (region.size >= 0 || !one_of(region.type, MemoryRegion::RegionType::OUTPUT, MemoryRegion::RegionType::IO)) {
             return false;
@@ -1103,7 +1090,7 @@ static OutputMemoryBlocks FilterOutDynamicOutputEdges(MemoryRegions& memoryRegio
  * 1) EdgeClusters - to propagate the solution through the graph
  * 2) OutputMemoryBlocks - to allow memory sharing between graph and infer request
  */
-static std::tuple<MemoryControl::MemorySolution, EdgeClusters, OutputMemoryBlocks>
+static std::tuple<MemoryControl::MemorySolution, EdgeClusters, Graph::OutputMemoryBlocks>
 SolveMemoryReuse(const std::shared_ptr<MemoryControl>& memoryControl,
                  const AllocationContext& allocationContext,
                  const GraphContext::CPtr graphContext,

@@ -30,11 +30,10 @@ namespace node {
 class MemoryStateNode;
 } // namespace node
 
-using OutputMemoryBlocks = std::unordered_map<std::size_t, ProxyMemoryBlockPtr>;
-
 class Graph {
 public:
-    typedef std::shared_ptr<Graph> Ptr;
+    using Ptr = std::shared_ptr<Graph>;
+    using OutputMemoryBlocks = std::unordered_map<std::size_t, ProxyMemoryBlockPtr>;
 
     enum class Status {
         NotReady = 0,
@@ -237,8 +236,6 @@ public:
     void Activate(const std::vector<MemoryPtr>& externalInputMemory = {},
                   const std::vector<MemoryPtr>& externalOutputMemory = {});
 
-    void Allocate();
-
     /**
      * Register the graph in the global allocation context by transforming
      * local execution data into the global one:
@@ -290,6 +287,7 @@ protected:
                    const std::vector<node::Input::OutputConfig>& outputConfigs = {});
 
     void Configure(bool optimize = true);
+    void Allocate();
 
     void InitNodes();
     void InitDescriptors();

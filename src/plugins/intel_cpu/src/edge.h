@@ -31,7 +31,7 @@ public:
     enum class Status {
         Uninitialized,  // base edge is unknown yet
         NeedAllocation, // edge is the base edge
-        NotAllocated,   // edge is a referencing edge
+        NotAllocated,   // edge references another edge
         Allocated,      // edge memory is allocated
         Validated       // edge is validated
     };
