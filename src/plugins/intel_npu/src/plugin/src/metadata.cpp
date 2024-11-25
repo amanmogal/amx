@@ -46,12 +46,19 @@ std::unique_ptr<MetadataBase> createMetadata(uint32_t version) {
 }
 
 bool Metadata<METADATA_VERSION_1_0>::isCompatible() {
+    Logger _logger("NPUPlugin", Logger::global().level());
     // checking if we still support the format
     if (version != CURRENT_METADATA_VERSION) {
         return false;
     }
+
+    std::string_view currentOvVersion(ov::get_openvino_version().buildNumber);
     // checking if we can import the blob
-    return ovVersion.version == ov::get_openvino_version().buildNumber;
+    if (ovVersion.version != currentOvVersion) {
+        _logger.warning("Imported blob metadata version: %s, but the current OpenVINO version is: %s", ovVersion.version, currentOvVersion.data());
+        return false;
+    }
+    return true;;
 }
 
 std::unique_ptr<MetadataBase> read_metadata_from(std::vector<uint8_t>& blob) {

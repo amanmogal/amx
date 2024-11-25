@@ -788,7 +788,6 @@ std::shared_ptr<ov::ICompiledModel> Plugin::import_model(std::istream& stream, c
         if (storedMeta == nullptr) {
             OPENVINO_THROW("Could not read metadata!");
         } else if (!storedMeta->isCompatible()) {
-            // _logger.info print for storedMeta members or use std::cout?
             OPENVINO_THROW("Incompatible blob metadata version!");
         }
 
