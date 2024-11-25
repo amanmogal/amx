@@ -405,19 +405,20 @@ void Transformations::PreLpt(const std::vector<ov::element::Type>& defaultPrecis
         precisions_map fp_convert_precision_map = {{ov::element::f32, ov::element::f16}};
 #if defined(OPENVINO_ARCH_ARM) || defined(OPENVINO_ARCH_ARM64)
         type_to_fuse_map fuse_map = {{ov::opset1::FakeQuantize::get_type_info_static(), fuse_type_to_fq}};
+        const bool store_original_precision_as_rt_attribute = false;
 #else
         type_to_fuse_map fuse_map = {{ov::op::PagedAttentionExtension::get_type_info_static(), fuse_type_to_pa}};
+        const bool store_original_precision_as_rt_attribute = true;
 #endif
         const bool keep_precision_sensitive_in_fp32 = true;
         const bool need_convert_input_output_precision = false;
-        const bool save_original_precision_attribute = true;
         CPU_REGISTER_PASS_COMMON(manager,
                                  ov::pass::ConvertPrecision,
                                  fp_convert_precision_map,
                                  fuse_map,
                                  keep_precision_sensitive_in_fp32,
                                  need_convert_input_output_precision,
-                                 save_original_precision_attribute);
+                                 store_original_precision_as_rt_attribute);
     }
     CPU_REGISTER_PASS_COMMON(manager, ov::pass::KeepConstAndDecompression);
     CPU_SET_CALLBACK_COMMON(manager,

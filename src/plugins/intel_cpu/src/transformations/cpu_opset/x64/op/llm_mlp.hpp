@@ -33,7 +33,8 @@ public:
     //      2: up_proj
     //      3: down_proj
     LLMMLPNode(const OutputVector& args, const Config& cfg, const ov::element::Type output_type = ov::element::undefined)
-        : Op(args), m_args(args), m_config(cfg), m_output_type(output_type) {
+        : Op(args), m_config(cfg), m_output_type(output_type) {
+        m_args = args;
         validate_and_infer_types();
     }
 
