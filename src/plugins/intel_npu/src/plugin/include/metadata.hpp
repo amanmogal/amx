@@ -16,9 +16,9 @@ constexpr uint32_t make_version(uint16_t major, uint16_t minor) {
     return major << 16 | (minor & 0x0000ffff);
 }
 
-constexpr uint32_t METADATA_VERSION_1_0 { make_version(1, 0) };
+constexpr uint32_t METADATA_VERSION_1_0{make_version(1, 0)};
 
-constexpr uint32_t CURRENT_METADATA_VERSION { METADATA_VERSION_1_0 };
+constexpr uint32_t CURRENT_METADATA_VERSION{METADATA_VERSION_1_0};
 
 struct OpenvinoVersion {
     std::string version;

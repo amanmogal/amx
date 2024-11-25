@@ -22,7 +22,9 @@ void OpenvinoVersion::read(std::istream& stream) {
     stream.read(&version[0], size);
 }
 
-Metadata<METADATA_VERSION_1_0>::Metadata() : ovVersion{ov::get_openvino_version().buildNumber} { version = METADATA_VERSION_1_0; }
+Metadata<METADATA_VERSION_1_0>::Metadata() : ovVersion{ov::get_openvino_version().buildNumber} {
+    version = METADATA_VERSION_1_0;
+}
 
 void Metadata<METADATA_VERSION_1_0>::read(std::istream& stream) {
     ovVersion.read(stream);
@@ -37,11 +39,11 @@ void Metadata<METADATA_VERSION_1_0>::write(std::ostream& stream) {
 
 std::unique_ptr<MetadataBase> createMetadata(uint32_t version) {
     switch (version) {
-        case METADATA_VERSION_1_0:
-            return std::make_unique<Metadata<METADATA_VERSION_1_0>>();
+    case METADATA_VERSION_1_0:
+        return std::make_unique<Metadata<METADATA_VERSION_1_0>>();
 
-        default:
-            return nullptr;
+    default:
+        return nullptr;
     }
 }
 
@@ -55,10 +57,13 @@ bool Metadata<METADATA_VERSION_1_0>::isCompatible() {
     std::string_view currentOvVersion(ov::get_openvino_version().buildNumber);
     // checking if we can import the blob
     if (ovVersion.version != currentOvVersion) {
-        _logger.warning("Imported blob metadata version: %s, but the current OpenVINO version is: %s", ovVersion.version, currentOvVersion.data());
+        _logger.warning("Imported blob metadata version: %s, but the current OpenVINO version is: %s",
+                        ovVersion.version,
+                        currentOvVersion.data());
         return false;
     }
-    return true;;
+    return true;
+    ;
 }
 
 std::unique_ptr<MetadataBase> read_metadata_from(std::vector<uint8_t>& blob) {
