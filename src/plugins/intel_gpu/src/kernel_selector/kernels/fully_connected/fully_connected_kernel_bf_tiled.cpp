@@ -96,7 +96,9 @@ static size_t get_dynamic_quantize_group_size(const fully_connected_params& para
                                         << dynamic_quantization_group_size << ". Reduce FC dyn-quan group size to scale size." << std::endl;
                 dynamic_quantization_group_size = scale_group_size;
             }
-            return (size_t)dynamic_quantization_group_size;
+            // [TEST]
+            // return (size_t)dynamic_quantization_group_size;
+            return (size_t)(get_input_bf_size(params).second);
         }
     }
 
@@ -685,7 +687,10 @@ JitConstants FullyConnected_bf_tiled::GetJitConstants(const fully_connected_para
     jit.AddConstant(MakeJitConstant("TILE_IFM_ELEMENTS_SIZE", (dispatchData.tile_mk * simd)));
 
     if (quantize_grp_size / (dispatchData.tile_mk * simd) > 1 && quantize_grp_size % (dispatchData.tile_mk * simd) == 0) {
-        jit.AddConstant(MakeJitConstant("NUM_LOOP_IN_DYN_QUAN_GROUP", quantize_grp_size / (dispatchData.tile_mk * simd)));
+        const size_t scale_group_size = params.weights.IFM().v / params.decompression_scale.Feature().v;
+        // For decompression post operation, scale group size and dynamic quantizing group size should fit to each other.
+        const size_t post_ops_size = (scale_group_size < quantize_grp_size) ? scale_group_size : quantize_grp_size;
+        jit.AddConstant(MakeJitConstant("NUM_LOOP_IN_DYN_QUAN_GROUP", post_ops_size / (dispatchData.tile_mk * simd)));
     } else {
         jit.AddConstant(MakeJitConstant("NUM_LOOP_IN_DYN_QUAN_GROUP", 1));
     }
@@ -805,7 +810,9 @@ void FullyConnected_bf_tiled::GetUpdateDispatchDataFunc(KernelData& kd) const {
                         // quantized input is char type
                         kd.internalBufferSizes.push_back(input_size);
                         // half type of de_quan_scale and activation sum for each quantized group
-                        kd.internalBufferSizes.push_back((input_size / quantize_grp_size) * 2 * 2);
+                        // [TEST]
+                        // kd.internalBufferSizes.push_back((input_size / quantize_grp_size) * 2 * 2);
+                        kd.internalBufferSizes.push_back((input_size / quantize_grp_size) * 2 * 4);
                     }
 
                     kd.kernels[0].params.workGroups.global = {std::max((input_size / quantize_grp_size), (size_t)1), 1, 1};
@@ -852,7 +859,7 @@ KernelsData FullyConnected_bf_tiled::GetTunedKernelsDataByIndex(const Params &pa
     }
 
     KernelsData kernels_data;
-    if (should_dynamic_quantize(fc_params)) {
+    if (should_dynamic_quantize(fc_params, true)) {
         // Use seperate 2 kernels for dynamic quantizing : quantizing_kernel + fc_kernel
         // 1st kernel : Dynamic quantizing by dynamic_quantize_grp_size
         // 2nd kernel : fully connected kernel with KernelType::DEFAULT. Quantized inputs and scale values could be used.
@@ -981,7 +988,9 @@ KernelsData FullyConnected_bf_tiled::GetMultiKernelsData(const Params &params,
         auto input_size = std::max(fc_params.inputs[0].PhysicalSize(), get_input_bf_size(fc_params).second);
         if (!params.is_shape_agnostic)
             input_size = std::max(input_size, Align(get_input_bf_size(fc_params).first, lws_batches) * get_input_bf_size(fc_params).second);
+        // [TEST]
         dyn_quan_dispatch.gws = {input_size / quantize_grp_size, 1, 1};
+        // dyn_quan_dispatch.gws = {input_size / get_input_bf_size(fc_params).second, 1, 1};
         dyn_quan_dispatch.lws = {16, 1, 1};
         quan_kernel.params.workGroups.global = dyn_quan_dispatch.gws;
         quan_kernel.params.workGroups.local = dyn_quan_dispatch.lws;
@@ -1013,7 +1022,11 @@ KernelsData FullyConnected_bf_tiled::GetMultiKernelsData(const Params &params,
         // char type quantized input
         kd.internalBufferSizes.push_back(input_size);
         // half type of de_quan_scale and activation sum for each quantized group
-        kd.internalBufferSizes.push_back(input_size / quantize_grp_size * 2 * 2);
+        // [TEST]
+        // kd.internalBufferSizes.push_back(input_size / quantize_grp_size * 2 * 2);
+        // [TEST]
+        // kd.internalBufferSizes.push_back((input_size / get_input_bf_size(fc_params).second) * 2 * 2);
+        kd.internalBufferSizes.push_back((input_size / get_input_bf_size(fc_params).second) * 2 * 4);
         kernel_number++;
     }
     kd.internalBufferDataType = Datatype::F16;
