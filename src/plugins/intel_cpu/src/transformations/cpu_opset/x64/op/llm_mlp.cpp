@@ -56,7 +56,7 @@ void LLMMLPNode::validate_and_infer_types() {
 
     auto oshape = ishape;
     oshape[oshape.size() - 1] = w_down_shape[0];
-    auto otype = m_config.tail_f32 ? ov::element::f32 : itype;
+    auto otype = m_output_type == ov::element::undefined ? itype : m_output_type;
     set_output_type(0, otype, oshape);
 }
 

@@ -12,9 +12,6 @@
 #include "openvino/pass/pattern/op/wrap_type.hpp"
 #include "transformations/cpu_opset/x64/op/llm_mlp.hpp"
 
-/*
- */
-
 using namespace ov;
 using namespace ov::pass::pattern;
 
@@ -41,11 +38,9 @@ intel_cpu::MLPFuseConvert::MLPFuseConvert() {
         }
 
         OutputVector args = mlp_node->get_args();
-        auto cfg = mlp_node->get_config();
+        const auto cfg = mlp_node->get_config();
 
-        cfg.tail_f32 = true;
-
-        auto new_mlp = std::make_shared<ov::intel_cpu::LLMMLPNode>(args, cfg);
+        auto new_mlp = std::make_shared<ov::intel_cpu::LLMMLPNode>(args, cfg, ov::element::f32);
 
         copy_runtime_info(m_cvt, new_mlp);
         ov::replace_node(m_cvt, new_mlp);
