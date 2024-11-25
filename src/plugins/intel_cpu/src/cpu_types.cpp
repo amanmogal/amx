@@ -368,6 +368,7 @@ std::string NameFromType(const Type type) {
         CASE(ExperimentalDetectronPriorGridGenerator);
         CASE(ExperimentalDetectronGenerateProposalsSingleImage);
         CASE(GenerateProposals);
+        CASE(Identity);
         CASE(Inverse);
         CASE(ExtractImagePatches);
         CASE(NonMaxSuppression);
