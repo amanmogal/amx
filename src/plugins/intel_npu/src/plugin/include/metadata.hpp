@@ -13,7 +13,7 @@ namespace intel_npu {
 constexpr std::string_view MAGIC_BYTES = "OVNPU";
 
 constexpr uint32_t make_version(uint16_t major, uint16_t minor) {
-    return (major << sizeof(major) * 8) | (minor & 0x0000ffff);
+    return major << 16 | (minor & 0x0000ffff);
 }
 
 constexpr uint32_t METADATA_VERSION_1_0 { make_version(1, 0) };
