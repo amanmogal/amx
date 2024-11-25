@@ -35,7 +35,7 @@ void Metadata<METADATA_VERSION_1_0>::write(std::ostream& stream) {
     stream.write(ovVersion.version.c_str(), ovVersion.version.size());
 }
 
-std::unique_ptr<MetadataBase> createMetadata(uint16_t version) {
+std::unique_ptr<MetadataBase> createMetadata(uint32_t version) {
     switch (version) {
         case METADATA_VERSION_1_0:
             return std::make_unique<Metadata<METADATA_VERSION_1_0>>();
@@ -75,7 +75,7 @@ std::unique_ptr<MetadataBase> read_metadata_from(std::vector<uint8_t>& blob) {
     metadataStream.write(reinterpret_cast<const char*>(&(*metadataIterator)),
                          blob.end() - metadataIterator - sizeof(blobDataSize));
 
-    uint16_t metaVersion;
+    uint32_t metaVersion;
     metadataStream.read(reinterpret_cast<char*>(&metaVersion), sizeof(metaVersion));
 
     auto storedMeta = createMetadata(metaVersion);
