@@ -272,7 +272,25 @@ protected:
 
         dnnl::memory::desc in0_md = get_input_memory_desc(in0_dims, in0_dt, in0_fmt, in0_strides);
         dnnl::memory::desc in1_md = get_input_memory_desc(in1_dims, in1_dt, in1_fmt, in1_strides);
-        dnnl::memory::desc out_md(out_dims, out_dt, out_fmt);
+
+        // Get non transposed output dims
+        auto output_order = prim->output_transpose_order;
+        bool b_output_transposed = false;
+        for (int64_t i = 0; i < static_cast<int64_t>(output_order.size()); i++) {
+            if (output_order[i] != i) {
+                b_output_transposed = true;
+                break;
+            }
+        }
+
+        dnnl::memory::dims non_transposed_out_dims = out_dims;
+        if (b_output_transposed) {
+            for (int64_t i = 0; i < static_cast<int64_t>(output_order.size()); i++) {
+                non_transposed_out_dims[i] = out_dims[output_order[i]];
+            }
+        }
+
+        dnnl::memory::desc out_md(non_transposed_out_dims, out_dt, out_fmt);
 
         if (gemm_with_bias) {
             dnnl::memory::desc bias_md(bias_dims, bias_dt, bias_fmt);
