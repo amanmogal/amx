@@ -51,7 +51,7 @@ struct primitive_type_base : primitive_type {
             if ((node.get_forced_impl_type() & impl_type) != impl_type)
                 continue;
 
-            if (impl_type == impl_types::onednn && !node.get_program().get_layout_optimizer().get_optimization_attributes().use_onednn_impls)
+            if (impl_type == impl_types::onednn && !node.get_program().get_layout_optimizer().contains_onednn_impls_optimization_attribute(&node))
                 continue;
 
             shape_types supported_shape_type = impl->get_shape_type();
@@ -168,7 +168,7 @@ struct primitive_type_base : primitive_type {
                     return true;
                 continue;
             } else {
-                if (impl_type == impl_types::onednn && !node.get_program().get_layout_optimizer().get_optimization_attributes().use_onednn_impls)
+                if (impl_type == impl_types::onednn && !node.get_program().get_layout_optimizer().contains_onednn_impls_optimization_attribute(&node))
                     continue;
 
                 if (!impl->validate(node))
@@ -179,17 +179,6 @@ struct primitive_type_base : primitive_type {
         }
 
         return false;
-    }
-
-    cldnn::layout calc_output_layout(const cldnn::program_node& node, const kernel_impl_params& impl_param) const override {
-        OPENVINO_ASSERT(node.type() == this, "[GPU] primitive_type_base::calc_output_layout: primitive type mismatch");
-        for (auto& t : impl_param.input_layouts) {
-            GPU_DEBUG_TRACE_DETAIL << impl_param.desc->id << " input tensor: " << t.to_short_string() << std::endl;
-        }
-        auto res = typed_primitive_inst<PType>::calc_output_layout(node, impl_param);
-
-        GPU_DEBUG_TRACE_DETAIL << impl_param.desc->id << " output tensor: " << res.to_short_string() << std::endl;
-        return res;
     }
 
     std::vector<cldnn::layout> calc_output_layouts(const cldnn::program_node& node, const kernel_impl_params& impl_param) const override {

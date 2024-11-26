@@ -489,7 +489,7 @@ void remove_redundant_reorders::run(program& p) {
                             (dep.get_output_layout().format == format::b_fs_yx_fsv16 ||
                              dep.get_output_layout().format == format::bfyx ||
                              (dep.get_output_layout().format == format::fs_b_yx_fsv32 &&
-                             !lo.get_optimization_attributes().use_onednn_impls));
+                             !lo.has_all_enabled_onednn_impls_optimization_attribute()));
 
         auto convert_color_opt = usr->is_type<convert_color>() && prim_desc->has_surface_input();
 
@@ -676,8 +676,7 @@ void remove_redundant_reorders::run(program& p) {
         // In case of new shape infer we should not shrink reshapes chain if first reshape changes input rank, e.g.
         // [a, b] -> reshape1 -> [a1, b1, c1] -> reshape2 -> [a2, b2, 0] and any of the reshapes has special_zero=true
         // Configuration above will fail if we remove reshape1 node as attempt to handle special zero will fail due to small rank of input
-        if (p.is_new_shape_infer() &&
-            reshape_node.get_output_pshape().size() != dep_node.get_input_pshape().size() &&
+        if (reshape_node.get_output_pshape().size() != dep_node.get_input_pshape().size() &&
             (reshape_node.get_primitive()->special_zero || reshape_input_node.get_primitive()->special_zero))
             continue;
 

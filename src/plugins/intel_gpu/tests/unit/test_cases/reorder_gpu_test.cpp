@@ -103,8 +103,6 @@ static void compare_bfyx2blocked_with_ref(const std::string& kernel_name,
     network_ref->set_input_data("input", input);
 
     auto outputs_ref = network_ref->execute();
-    cldnn::event::ptr e1 = outputs_ref.at("reorder").get_event();
-    e1->wait();
 
     // run on optimized kernel
     ov::intel_gpu::ExecutionConfig config = get_test_default_config(engine);
@@ -116,8 +114,6 @@ static void compare_bfyx2blocked_with_ref(const std::string& kernel_name,
     network->set_input_data("input", input);
 
     auto outputs = network->execute();
-    cldnn::event::ptr e2 = outputs.at("reorder").get_event();
-    e2->wait();
 
     // compare output_ref and output_opt.
     if (output_data_type == data_types::i8)
@@ -1360,7 +1356,7 @@ TEST(reorder_gpu_f32, dynamic_bfyx_to_bfyx_dynamic_padding_x) {
 
     ExecutionConfig config = get_test_default_config(engine);
     config.set_property(ov::intel_gpu::optimize_data(false));
-    config.set_property(ov::intel_gpu::allow_new_shape_infer(true));
+
     network network(engine, topology, config);
     auto input_mem = engine.allocate_memory({ov::PartialShape(in_shape),
                                              data_types::f16,
@@ -1422,7 +1418,7 @@ TEST(reorder_gpu_f32, dynamic_bfyx_to_bfyx_dynamic_padding_f) {
 
     ExecutionConfig config = get_test_default_config(engine);
     config.set_property(ov::intel_gpu::optimize_data(false));
-    config.set_property(ov::intel_gpu::allow_new_shape_infer(true));
+
     network network(engine, topology, config);
     auto input_mem = engine.allocate_memory({ov::PartialShape(in_shape),
                                              data_types::f16,
@@ -1487,7 +1483,7 @@ TEST(reorder_gpu_f32, dynamic_bfyx_to_bfzyx) {
 
     ExecutionConfig config = get_test_default_config(engine);
     config.set_property(ov::intel_gpu::optimize_data(true));
-    config.set_property(ov::intel_gpu::allow_new_shape_infer(true));
+
     network network(engine, topology, config);
 
     auto inst = network.get_primitive("reorder");
@@ -1555,7 +1551,6 @@ TEST(reorder_gpu_f32, dynamic_bfyx_to_fsv16) {
         reorder("output_reorder", input_info("relu"), format::bfyx, data_types::f32));
 
     ExecutionConfig config = get_test_default_config(engine);
-    config.set_property(ov::intel_gpu::allow_new_shape_infer(true));
     network network(engine, topology, config);
 
     auto fsv16_reorder_inst = network.get_primitive("reorder");
@@ -1917,10 +1912,8 @@ TEST(reorder_gpu_opt, non_trivial_remove_redundant)
     auto outputs = net.execute();
     auto executed_primitives = net.get_executed_primitives();
 
-    if (engine.get_device_info().supports_immad) {
-        // Currently, oneDNN only supports in_order_queue
-        return;
-    }
+    if (config.get_property(ov::intel_gpu::queue_type) != QueueTypes::out_of_order)
+        GTEST_SKIP();
 
     ASSERT_TRUE(executed_primitives.count("in") == 1);
     ASSERT_TRUE(executed_primitives.at("in") != outputs.at("r1").get_event());
@@ -3466,7 +3459,6 @@ TEST(reorder_gpu_fp32, test_needs_completion_events) {
     ExecutionConfig config = get_test_default_config(engine);
     auto force_impl = ov::intel_gpu::ImplementationDesc{ format::bfyx, "", impl_types::cpu };
     config.set_property(ov::intel_gpu::force_implementations(ov::intel_gpu::ImplForcingMap{ {primitive_id("reorder2"), force_impl} }));
-    config.set_property(ov::intel_gpu::allow_new_shape_infer(true));
     network network(engine, topology, config);
 
     network.set_input_data("input1", input1);

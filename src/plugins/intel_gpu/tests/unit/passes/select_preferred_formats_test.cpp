@@ -35,13 +35,13 @@ TEST(test_select_preferred_formats, setting_target_conv_format) {
     topology.add(convolution("conv1", input_info("reorder"), "weights", "", 1, {1, 1}, {1, 1}, {0, 0}, {0, 0}, false));
 
     ExecutionConfig config = get_test_default_config(engine);
-    config.set_property(ov::intel_gpu::allow_new_shape_infer(true));
+
     ov::intel_gpu::ImplementationDesc impl = { format::b_fs_yx_fsv16, std::string(""), impl_types::onednn };
     config.set_property(ov::intel_gpu::force_implementations(ov::intel_gpu::ImplForcingMap{ {"conv1", impl} }));
 
     auto prog = program::build_program(engine, topology, config, false, true);
     if (engine.get_device_info().supports_immad) {
-        prog->get_layout_optimizer().set_optimization_attribute(layout_optimizer::optimization_attributes_type::use_onednn_impls, 1);
+        prog->get_layout_optimizer().add_all_onednn_impls_optimization_attribute();
     }
 
     // It initializes output_layout.
@@ -84,13 +84,12 @@ TEST(test_select_preferred_formats, fsv2_fallback_to_byxf) {
     topology.add(convolution("conv1", input_info("reorder"), "weights", "", 2, {1, 1}, {1, 1}, {2, 1}, {0, 1}, true));
 
     ExecutionConfig config = get_test_default_config(engine);
-    config.set_property(ov::intel_gpu::allow_new_shape_infer(true));
     ov::intel_gpu::ImplementationDesc impl = { format::b_fs_yx_fsv16, std::string(""), impl_types::onednn };
     config.set_property(ov::intel_gpu::force_implementations(ov::intel_gpu::ImplForcingMap{ {"conv1", impl} }));
 
     auto prog = program::build_program(engine, topology, config, false, true);
     if (engine.get_device_info().supports_immad) {
-        prog->get_layout_optimizer().set_optimization_attribute(layout_optimizer::optimization_attributes_type::use_onednn_impls, 1);
+        prog->get_layout_optimizer().add_all_onednn_impls_optimization_attribute();
     }
 
     // It initializes output_layout.
