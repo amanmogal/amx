@@ -44,9 +44,10 @@ public:
         return rtParamsCache;
     }
 
-    DnnlScratchPadPtr getScratchPad(int subStreamID = 0) const {
-        if (subStreamID < 0)
-            subStreamID = 0;
+    DnnlScratchPadPtr getScratchPad(int subStreamID = -1) const {
+        if (subStreamID < 0) {
+            subStreamID = std::max(0, streamExecutor ? streamExecutor->get_numa_node_id() : subStreamID);
+        }
         if (subStreamID >= numNumaNodes - 1)
             subStreamID = numNumaNodes - 1;
         return rtScratchPads[subStreamID];
