@@ -2429,6 +2429,7 @@ void MVN::MVNJitExecutor::mvn_nspc(const uint8_t* src_data, uint8_t* dst_data, c
 
         // kernel_type: 0 for mean, 1 for variance, 2 for normalization
         auto worker = [&](const bool across_channel, const int kernel_type) {
+
             parallel_nt(threads_num, [&](const int ithr, const int nthr) {
                 size_t start = 0, end = 0;
                 splitter(D * H * W, nthr, ithr, start, end);
@@ -2514,7 +2515,8 @@ void MVN::MVNJitExecutor::mvn_nspc(const uint8_t* src_data, uint8_t* dst_data, c
         }
     };
 
-    parallel_nt_static(threads_num, [&](const int ithr, const int nthr) {
+    auto b_threads = std::min(threads_num, N);
+    parallel_nt_static(b_threads, [&](const int ithr, const int nthr) {
         for_1d(ithr, nthr, N, b_loop);
     });
 }
