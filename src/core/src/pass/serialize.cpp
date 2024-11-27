@@ -84,9 +84,10 @@ std::string translate_type_name(const std::string& name) {
 
 class ConstantWriter {
 public:
-    using FilePosition = int64_t;
     using HashValue = size_t;
-    using ConstWritePositions = std::multimap<HashValue, std::pair<FilePosition, void const*>>;
+    using FilePosition = int64_t;
+    using BlobSize = size_t;
+    using ConstWritePositions = std::multimap<HashValue, std::tuple<FilePosition, BlobSize, void const*>>;
 
     ConstantWriter(std::ostream& bin_data, bool enable_compression = true)
         : m_binary_output(bin_data),
@@ -132,17 +133,17 @@ public:
             // Therefore we always have to compare values when finding a match in the hash multimap.
             const HashValue hash = ov::runtime::compute_hash(ptr_to_write, new_size);
 
-            auto found = m_hash_to_file_positions.find(hash);
+            auto found = m_hash_to_file_positions.equal_range(hash);
             // iterate over all matches of the key in the multimap
-            while (found != m_hash_to_file_positions.end()) {
-                if (memcmp(ptr, found->second.second, size) == 0) {
-                    return found->second.first;
+            for (auto it = found.first; it != found.second; ++it) {
+                if (std::get<1>(it->second) == new_size && memcmp(ptr, std::get<2>(it->second), new_size) == 0) {
+                    return std::get<0>(it->second);
                 }
-                found++;
             }
+
             // Since fp16_compressed data will be disposed at exit point and since we cannot reread it from the ostream,
             // we store pointer to the original uncompressed blob.
-            m_hash_to_file_positions.insert({hash, {offset, static_cast<void const*>(ptr)}});
+            m_hash_to_file_positions.insert({hash, {offset, new_size, static_cast<void const*>(ptr)}});
             if (m_write_hash_value) {
                 m_binary_output.write(reinterpret_cast<const char*>(&hash), sizeof(uint64_t));
             } else {
