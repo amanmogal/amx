@@ -121,7 +121,7 @@ static bool should_dynamic_quantize(const fully_connected_params& params, bool p
 
     const size_t scale_group_size = params.weights.IFM().v / params.decompression_scale.Feature().v;
     if ((scale_group_size % simd == 0) && (input_f % dynamic_quantization_group_size == 0) &&
-        (params.is_shape_agnostic || (params.inputs[0].Batch().v > 1 && input_b > min_slm_size)) &&
+        (params.is_shape_agnostic || input_b > min_slm_size) &&
         params.inputs[0].GetDType() == Datatype::F16 && is_weight_dyn_quantizable(params)) {
             if (print_log) {
                 GPU_DEBUG_TRACE_DETAIL << " Dynamic quantizing for FC : scale_group_size: " << scale_group_size <<
@@ -410,6 +410,9 @@ FullyConnected_bf_tiled::GetAutoTuneParams(const fully_connected_params& params,
         (is_weight_dyn_quantizable(params) && should_dynamic_quantize(params))) {
         // Only 4bit weight type is fully optimized to use SLM. In default kernel, SLM is not applied to 8bit weight.
         if (!params.is_shape_agnostic && batch == 1) {
+            if (should_dynamic_quantize(params))
+                return selector.Default(tune_params(1, 2, 4, 2, 1, 1, 1, EXE_MODE_DEFAULT));
+
             // Tuning for Meteor Lake
             if (is_weight_vertical(params, output_f)) {
                 if (params.weights.GetLayout() == WeightsLayout::os_is_yx_osv32_isv2) {
