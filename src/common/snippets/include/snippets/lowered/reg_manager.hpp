@@ -36,7 +36,7 @@ public:
         return m_live_reg.at(expr);
     }
 
-    inline void set_live_range(const Reg& reg, LiveInterval&& interval, bool force = false) {
+    inline void set_live_range(const Reg& reg, const LiveInterval& interval, bool force = false) {
         OPENVINO_ASSERT(force || m_reg_live_range.count(reg) == 0, "Live range for this reg is already set");
         m_reg_live_range[reg] = interval;
     }

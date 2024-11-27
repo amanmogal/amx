@@ -68,6 +68,10 @@
 #include "ov_ops/type_relaxed.hpp"
 #include "openvino/pass/serialize.hpp"
 
+// todo: remove
+#include "snippets/lowered/pass/serialize_control_flow.hpp"
+#include "snippets/lowered/pass/serialize_data_flow.hpp"
+
 #include <algorithm>
 #include <memory>
 #include <array>
@@ -521,6 +525,9 @@ void Subgraph::control_flow_transformations(size_t min_parallel_work_amount, siz
     gen_pipeline.register_pass<lowered::pass::CleanupLoopOffsets>();
     gen_pipeline.register_pass<lowered::pass::OptimizeLoopSingleEvaluation>();
     gen_pipeline.run(*m_linear_ir);
+
+    ov::snippets::lowered::pass::SerializeControlFlow("snsdebug_assign_control.xml").run(*m_linear_ir);
+    ov::snippets::lowered::pass::SerializeDataFlow("snsdebug_assign_data.xml").run(*m_linear_ir);
 }
 
 snippets::Schedule Subgraph::generate(const BlockedShapeVector& blocked_input_shapes,

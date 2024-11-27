@@ -82,8 +82,18 @@ void jit_brgemm_emitter::emit_impl(const std::vector<size_t>& in, const std::vec
     if (in.size() > 2)
         mem_ptrs_idxs.emplace_back(in[2]);
 
+    std::set<snippets::Reg> regs_to_spill;
+//    for (const auto r : mem_ptrs_idxs)
+//        regs_to_spill.emplace(snippets::RegType::gpr, r);
+
+    regs_to_spill.emplace(snippets::RegType::gpr, abi_param1.getIdx());
+    regs_to_spill.emplace(snippets::RegType::gpr, abi_param2.getIdx());
+    regs_to_spill.emplace(snippets::RegType::gpr, h->r10.getIdx());
+    regs_to_spill.emplace(snippets::RegType::gpr, h->rbp.getIdx());
+//    regs_to_spill.emplace(snippets::RegType::gpr, h->rbx.getIdx());
     EmitABIRegSpills spill(h);
-//    spill.preamble();
+    spill.preamble(regs_to_spill);
+//    h->int3();
 
     h->mov(h->rbp, reinterpret_cast<uint64_t>(BrgemmKernelExecutor::execute));
     auto reserved_stack_size = sizeof(BrgemmKernelExecutor::call_args);
@@ -120,7 +130,7 @@ void jit_brgemm_emitter::emit_impl(const std::vector<size_t>& in, const std::vec
 
     h->add(h->rsp, reserved_stack_size);
 
-//    spill.postamble();
+    spill.postamble();
 }
 
 }   // namespace intel_cpu
