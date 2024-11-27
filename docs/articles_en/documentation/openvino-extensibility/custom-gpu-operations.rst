@@ -40,8 +40,8 @@ There are two options for using the custom operation configuration file:
         :fragment: [part0]
 
 
-All OpenVINO samples, except the trivial ``hello_classification``, and most Open
-Model Zoo demos feature a dedicated command-line option ``-c`` to load custom kernels.
+All OpenVINO samples, except the trivial ``hello_classification``,
+feature a dedicated command-line option ``-c`` to load custom kernels.
 For example, to load custom operations for the classification sample, run the command below:
 
 .. code-block:: cpp
@@ -51,8 +51,8 @@ For example, to load custom operations for the classification sample, run the co
 
 .. important::
 
-   Due to the deprecation of Open Model Zoo, models in the OpenVINO IR format are now
-   published on `Hugging Face <https://huggingface.co/OpenVINO>`__.
+   Models in the OpenVINO IR format are gradually published on
+   `Hugging Face <https://huggingface.co/OpenVINO>`__.
 
 
 .. _config-file-format:
