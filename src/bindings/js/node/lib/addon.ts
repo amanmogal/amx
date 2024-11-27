@@ -419,6 +419,10 @@ interface Tensor {
    * It gets the tensor size as a total number of elements.
    */
   getSize(): number;
+  /**
+   * It gets the tensor is continuous or not.
+   */
+  isContinuous(): boolean;
 }
 
 /**
