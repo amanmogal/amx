@@ -148,6 +148,7 @@ if(RISCV64_XUANTIE)
 else()
     set(ENABLE_SHL_FOR_CPU_DEFAULT OFF)
 endif()
+set(ENABLE_KLEIDIAI_FOR_CPU ON)
 ov_dependent_option(ENABLE_SHL_FOR_CPU "Enable SHL for OpenVINO CPU Plugin" ${ENABLE_SHL_FOR_CPU_DEFAULT} "RISCV64" OFF)
 
 add_subdirectory(thirdparty)
@@ -173,6 +174,11 @@ endif()
 if(DNNL_USE_ACL)
     add_definitions(-DOV_CPU_WITH_ACL)
     set(OV_CPU_WITH_ACL ON)
+endif()
+
+if(ENABLE_KLEIDIAI_FOR_CPU)
+    add_definitions(-DOV_CPU_WITH_KLEIDIAI)
+    set(OV_CPU_WITH_KLEIDIAI ON)
 endif()
 
 if(OV_CPU_WITH_ACL)
@@ -214,6 +220,7 @@ if(NOT (AARCH64 OR ARM))
     list(APPEND EXCLUDE_PATHS ${CMAKE_CURRENT_SOURCE_DIR}/src/transformations/cpu_opset/arm/*
                               ${CMAKE_CURRENT_SOURCE_DIR}/src/emitters/plugin/aarch64/*
                               ${CMAKE_CURRENT_SOURCE_DIR}/src/nodes/executors/aarch64/*
+                              ${CMAKE_CURRENT_SOURCE_DIR}/src/nodes/executors/kleidiai/*
                               ${CMAKE_CURRENT_SOURCE_DIR}/src/nodes/kernels/aarch64/*)
 endif()
 
@@ -270,6 +277,21 @@ if (ENABLE_SNIPPETS_LIBXSMM_TPP)
 endif ()
 if(ENABLE_SHL_FOR_CPU)
     target_link_libraries(${TARGET_NAME} PRIVATE shl)
+endif()
+if(ENABLE_KLEIDIAI_FOR_CPU)
+    target_link_libraries(${TARGET_NAME} PRIVATE kleidiai)
+    set(KLEIDIAI_INCLUDE_DIRS
+            kleidiai/
+            kleidiai/kai/
+            kleidiai/kai/ukernels/
+            kleidiai/kai/ukernels/matmul/
+            kleidiai/kai/ukernels/matmul/matmul_clamp_f32_qai8dxp_qsi4cxp/
+            kleidiai/kai/ukernels/matmul/matmul_clamp_f32_qsi8d32p_qsi4c32p/
+            kleidiai/kai/ukernels/matmul/matmul_clamp_f32_qai8dxp_qsi4c32p/
+            kleidiai/kai/ukernels/matmul/pack/
+    )
+    include_directories(SYSTEM INTERFACE ${KLEIDIAI_INCLUDE_DIRS})
+    target_include_directories(${TARGET_NAME} SYSTEM PRIVATE $<TARGET_PROPERTY:kleidiai,INCLUDE_DIRECTORIES>)
 endif()
 target_include_directories(${TARGET_NAME} SYSTEM PRIVATE $<TARGET_PROPERTY:dnnl,INCLUDE_DIRECTORIES>)
 
@@ -372,6 +394,10 @@ if(BUILD_SHARED_LIBS)
 
     if(ENABLE_SHL_FOR_CPU)
         target_include_directories(${TARGET_NAME}_obj SYSTEM PUBLIC $<TARGET_PROPERTY:shl,INTERFACE_INCLUDE_DIRECTORIES>)
+    endif()
+
+    if(ENABLE_KLEIDIAI_FOR_CPU)
+        target_include_directories(${TARGET_NAME}_obj SYSTEM PUBLIC $<TARGET_PROPERTY:kleidiai,INTERFACE_INCLUDE_DIRECTORIES>)
     endif()
 
     ov_set_threading_interface_for(${TARGET_NAME}_obj)
