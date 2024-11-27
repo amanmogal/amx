@@ -154,6 +154,10 @@ public:
      */
     const std::vector<ov::Output<const ov::Node>>& get_outputs() const override;
 
+    void setSecondTaskExecutor(std::shared_ptr<ov::threading::ITaskExecutor> task_executor) {
+        m_second_request_executor = task_executor;
+    }
+
 protected:
     using Stage = std::pair<std::shared_ptr<ov::threading::ITaskExecutor>, ov::threading::Task>;
     /**
@@ -271,6 +275,7 @@ private:
     std::shared_ptr<IInferRequest> m_sync_request;
 
     std::shared_ptr<ov::threading::ITaskExecutor> m_request_executor;  //!< Used to run inference CPU tasks.
+    std::shared_ptr<ov::threading::ITaskExecutor> m_second_request_executor;  //!< Used to run inference CPU tasks.
     std::shared_ptr<ov::threading::ITaskExecutor>
         m_callback_executor;  //!< Used to run post inference callback in asynchronous pipline
     std::shared_ptr<ov::threading::ITaskExecutor>

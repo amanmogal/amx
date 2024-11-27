@@ -107,6 +107,18 @@ void ov::IAsyncInferRequest::infer_thread_unsafe() {
 }
 
 void ov::IAsyncInferRequest::start_async_thread_unsafe() {
+    // test code
+    static int g_num = 0;
+    if (g_num < 100) {
+        m_pipeline = {{m_second_request_executor, [this] {
+                       m_sync_request->infer();
+                   }}};
+    } else {
+        m_pipeline = {{m_request_executor, [this] {
+                       m_sync_request->infer();
+                   }}};
+    }
+    g_num++;
     run_first_stage(m_pipeline.begin(), m_pipeline.end(), m_callback_executor);
 }
 
