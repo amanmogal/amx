@@ -793,7 +793,7 @@ void loadBinary(const std::string& filePath, const BatchIndexer &fileSourceInBat
             requestedTensor = npu::utils::joinTensors(tensorsToJoin, layout);
         }
     } else {
-        if (fileBytes == reqTensorBytes) {
+        if (fileBytes >= reqTensorBytes) {
             binaryFile.read(reinterpret_cast<char*>(requestedTensor.data()),
                             static_cast<std::streamsize>(reqTensorBytes));
         } else {
