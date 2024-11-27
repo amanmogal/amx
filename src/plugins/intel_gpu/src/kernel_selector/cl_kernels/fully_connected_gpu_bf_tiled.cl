@@ -19,31 +19,56 @@
 
 #define INPUT_LOAD_SIZE                     4
 
+#define INPUT_ELEMENTS_COUNT                IFM_SIZE
+
+
 #if FC_KERNEL_DYNAMIC_QUANTIZE
 KERNEL(quantize_input)(
     const __global INPUT0_TYPE* input,
     __global DQ_TYPE* quantized_input,
-    __global INPUT0_TYPE* quan_var
+    __global float* quan_var
 ) {
     const uint offset = get_global_id(0);
 
+    // [TEST]
     const uint input_offset = offset * QUANTIZE_GROUP_SIZE;
     const uint quantize_block = QUANTIZE_GROUP_SIZE / 4;
+    // const uint input_offset = offset * INPUT_ELEMENTS_COUNT;
+    // const uint quantize_block = INPUT_ELEMENTS_COUNT / 4;
     MAKE_VECTOR_TYPE(INPUT0_TYPE, INPUT_LOAD_SIZE) input_0[quantize_block];
     MAKE_VECTOR_TYPE(DQ_TYPE, INPUT_LOAD_SIZE) quantized_value[quantize_block];
     INPUT0_TYPE  max[quantize_block];
 
+    // [TEST]
+    // if (get_global_id(0) == 0 && get_global_id(2) == 0) {
+    //     printf(">> Quantizing Kernel gid(%u) : QUANTIZE_GROUP_SIZE(%u) blocks(%u)\n",
+    //             (uint)get_global_id(0), (uint)QUANTIZE_GROUP_SIZE, quantize_block);
+    // }
     unroll_for (uint i = 0 ; i < quantize_block ; ++i) {
         input_0[i] = vload4(0, &input[input_offset + i * 4]);
         max[i] = fmax(fmax(fabs(input_0[i][0]), fabs(input_0[i][1])), fmax(fabs(input_0[i][2]), fabs(input_0[i][3])));
+
+        // if (get_global_id(0) == 0 && get_global_id(2) == 0)
+        //     printf("  (%.3f,%.3f,%.3f,%.3f:m(%.3f))", input_0[i][0], input_0[i][1], input_0[i][2], input_0[i][3], max[i]);
     }
+
+    // if (get_global_id(0) == 0 && get_global_id(2) == 0) {
+    //     printf("\n");
+    // }
 
     INPUT0_TYPE max_value = 0.001;
     for (uint i = 0 ; i < quantize_block ; i+=8) {
         INPUT0_TYPE temp = fmax(fmax(fmax(max[i], max[i+1]), fmax(max[i+2], max[i+3])),
                                 fmax(fmax(max[i+4], max[i+5]), fmax(max[i+6], max[i+7])));
+        // if (get_global_id(0) == 0 && get_global_id(2) == 0)
+        //     printf("  (%.3f)", temp);
+
         max_value = fmax(max_value, temp);
     }
+
+    // if (get_global_id(0) == 0 && get_global_id(2) == 0) {
+    //     printf("\n");
+    // }
 
     half quan_scale = (half)max_value / 127;
     #if COMPRESSED_WEIGHTS_INT8
@@ -53,15 +78,25 @@ KERNEL(quantize_input)(
         half4 buff = input_0[i] / (half4)quan_scale;
         quantized_value[i] = CAT(CAT(convert_, MAKE_VECTOR_TYPE(DQ_TYPE, INPUT_LOAD_SIZE)), _rte)(buff);
         #if COMPRESSED_WEIGHTS_INT8
+            // [TEST]
             quantized_sum += quantized_value[i][0] + quantized_value[i][1] + quantized_value[i][2] + quantized_value[i][3];
+            // char4 tmp = (quantized_value[i][0] + quantized_value[i][1] + quantized_value[i][2] + quantized_value[i][3]);
         #endif
         vstore4(quantized_value[i], 0, &quantized_input[input_offset + i * 4]);
     }
 
+    // [TEST]
+    // if (get_global_id(0) < 8 && get_global_id(2) == 0) {
+    //     printf("  -- get_global_id(0):(%d) max(%.3f) quantizing_scale(%.3f)\n", get_global_id(0), (float)max_value, (float)quan_scale); 
+    // }
+
     // Pair of quantizing_scale and quantized activation_sum for each group
-    quan_var[offset * 2] = quan_scale;
+    // [TEST]
+    // quan_var[offset * 2] = quan_scale;
+    quan_var[offset * 2] = (float)(quan_scale);
     #if COMPRESSED_WEIGHTS_INT8
-        quan_var[(offset * 2) + 1] = CAT(CAT(convert_, INPUT0_TYPE), _rte)(quantized_sum);
+        // quan_var[(offset * 2) + 1] = CAT(CAT(convert_, INPUT0_TYPE), _rte)(quantized_sum);
+        quan_var[(offset * 2) + 1] = CAT(CAT(convert_, float), _rte)(quantized_sum);
     #endif
 }
 #else  // !FC_KERNEL_DYNAMIC_QUANTIZE
@@ -138,8 +173,6 @@ KERNEL(quantize_input)(
     // For REALIGN_FP16_OFFSET one feature is processed separately before entering main loop to correct alignment.
     #define MAIN_LOOP_ELEMENTS_COUNT  (IFM_SIZE - 1)
 #endif
-
-#define INPUT_ELEMENTS_COUNT IFM_SIZE
 
 #if IS_DYNAMIC && COMPRESSED_WEIGHTS_INT4
 #pragma disable_includes_optimization
@@ -773,6 +806,9 @@ inline void FUNC(fc_bf_tiled_kernel_default)(
 #define SLM_WEIGHT_UNPACKED_VEC             MAKE_VECTOR_TYPE(SLM_WEIGHT_TYPE, FILTER_ELEMENTS_PER_LOAD)
 #define WEIGHT_VEC_TYPE                     MAKE_VECTOR_TYPE(SLM_WEIGHT_TYPE, TILE_K_OFM)
 #define MAKE_DQ_TYPE_VEC(x)                 MAKE_VECTOR_TYPE(DQ_TYPE, x)
+// [TEST]
+#define MAKE_HALF_VEC(x)                    MAKE_VECTOR_TYPE(half, x)
+#define MAKE_FLOAT_VEC(x)                   MAKE_VECTOR_TYPE(float, x)
 
 #define TO_DQ_TYPE(x)                       CAT(CAT(convert_, DQ_TYPE),_sat)(x)
 #define TO_DQ_VEC_TYPE(x)                   CAT(convert_, DQ_VEC_TYPE)(x)
@@ -788,7 +824,9 @@ inline void FUNC(fc_bf_tiled_kernel_dyn_quan)(
     OPTIONAL_SHAPE_INFO_ARG
     const __global INPUT0_TYPE* input,
     __global DQ_TYPE* quantized_input,
-    __global INPUT0_TYPE* quan_var,  // pair of params for each quantizing group : scale, activation_sum
+    // [TEST]
+    // __global INPUT0_TYPE* quan_var,  // pair of params for each quantizing group : scale, activation_sum
+    __global float* quan_var,
 #if DECOMPRESSION_SCALE_TERM
     const __global DECOMPRESSION_SCALE_TYPE* decompression_scale,
 #endif
@@ -851,15 +889,22 @@ inline void FUNC(fc_bf_tiled_kernel_dyn_quan)(
         uint weights_offset = out_f * INPUT_ELEMENTS_COUNT;
     #endif
 
+    // [TEST]
     ACCUMULATOR_VEC_TYPE    acc[TILE_B] = { };
+    // MAKE_VECTOR_TYPE(float, TILE_OFM) acc[TILE_B] = { };
 
     // Dynamic Quantize
     MAKE_VECTOR_TYPE(DQ_TYPE, INPUT_LOAD_SIZE)      tiled_input_0[HALF_TILE_B] = { };   // Load 4 linear inputs for packing
     PACKED_DQ_TYPE                                  packed_in_0[HALF_TILE_B] = { };     // Packing char4 inputs to 1 integer
     INPUT0_TYPE                                     de_quantize_scale[TILE_B];
 
+    // [TEST]
+    MAKE_VECTOR_TYPE(half, INPUT_LOAD_SIZE)         origin_input_0[HALF_TILE_B] = { };   // Load 4 linear inputs for packing
+
     #if COMPRESSED_WEIGHTS_INT8
-        INPUT0_TYPE activation_sum[TILE_B] = { };
+        // [TEST]
+        // INPUT0_TYPE activation_sum[TILE_B] = { };
+        float activation_sum[TILE_B] = { };
     #endif
 
     #if COMPRESSED_WEIGHTS && DECOMPRESSION_SCALE_GROUPS_NUM == 1
@@ -904,6 +949,7 @@ inline void FUNC(fc_bf_tiled_kernel_dyn_quan)(
 
     const uint scale_pitch = (TILE_IN_B_PITCH / QUANTIZE_GROUP_SIZE);
     MAKE_VECTOR_TYPE(int, TILE_B) acc_tmp[TILE_OFM] = { };
+    MAKE_VECTOR_TYPE(int, TILE_B) temp_acc_tmp[TILE_OFM] = { };
     __attribute__((opencl_unroll_hint(1)))
     for (uint ni = 0; ni < iterations; ++ni) {
         uint in_offset = input_offset + (idx_sglid + batch_sglid * TILE_IN_B_PITCH);
@@ -914,12 +960,17 @@ inline void FUNC(fc_bf_tiled_kernel_dyn_quan)(
             // Packing : Get 4(B)x4(K) integer vector (packing to 4x1 vector)
             packed_in_0[bi] = as_uint(tiled_input_0[bi]);
 
+            // [TEST]
+            origin_input_0[bi] = vload4(0, &input[in_offset]);
+
             // Next batch
             in_offset += (TILE_IN_B_PITCH * 2);
 
             #if NUM_LOOP_IN_DYN_QUAN_GROUP == 1
-                de_quantize_scale[bi * 2] = quan_var[scale_offset * 2];
-                de_quantize_scale[bi * 2 + 1] = quan_var[scale_offset * 2 + scale_pitch * 2];
+                // de_quantize_scale[bi * 2] = quan_var[scale_offset * 2];
+                // de_quantize_scale[bi * 2 + 1] = quan_var[scale_offset * 2 + scale_pitch * 2];
+                de_quantize_scale[bi * 2] = convert_half(quan_var[scale_offset * 2]);
+                de_quantize_scale[bi * 2 + 1] = convert_half(quan_var[scale_offset * 2 + scale_pitch * 2]);
                 #if COMPRESSED_WEIGHTS_INT8
                     // Need additional accumulation of quantized activation along the dyn-quan group
                     //  to use i8 multiplier for int8 weight
@@ -932,8 +983,12 @@ inline void FUNC(fc_bf_tiled_kernel_dyn_quan)(
 
         #if NUM_LOOP_IN_DYN_QUAN_GROUP > 1
             if (ni % NUM_LOOP_IN_DYN_QUAN_GROUP == 0) {
+                // if (get_global_id(0) == 0 && get_global_id(2) == 0) {
+                //     printf("\n>> FC kernel : ni(%u) NUM_LOOP_IN_DYN_QUAN_GROUP(%u)\n", ni, (uint)NUM_LOOP_IN_DYN_QUAN_GROUP);
+                // }
                 unroll_for (uint bi = 0; bi < TILE_B; ++bi) {
-                    de_quantize_scale[bi] = quan_var[scale_offset * 2];
+                    // de_quantize_scale[bi] = quan_var[scale_offset * 2];
+                    de_quantize_scale[bi] = convert_half(quan_var[scale_offset * 2]);
                     #if COMPRESSED_WEIGHTS_INT8
                         activation_sum[bi] = quan_var[scale_offset * 2 + 1];
                     #endif
@@ -1092,6 +1147,7 @@ inline void FUNC(fc_bf_tiled_kernel_dyn_quan)(
 
         barrier(CLK_LOCAL_MEM_FENCE);
 
+
         unroll_for(uint ki = 0; ki < TILE_IFM_ELEMENTS_SIZE / TILE_K; ++ki) {
             #if TILE_K != 4
                 #error "FC bf_tiled kernel: unsupported TILE_K size for SLM kernel"
@@ -1105,6 +1161,26 @@ inline void FUNC(fc_bf_tiled_kernel_dyn_quan)(
                 MAKE_DQ_TYPE_VEC(4) input_val = AS_DQ_TYPE_4(_sub_group_shuffle(packed_in_0[bi / 2], (bi % 2) * 8 + ki));
                 acc_tmp[0][bi] = imad_SW(acc_tmp[0][bi], input_val, first_weight);
                 acc_tmp[1][bi] = imad_SW(acc_tmp[1][bi], input_val, second_weight);
+
+                // [TEST]
+                #if 0
+                {
+                    MAKE_HALF_VEC(4) origin_input_val = {_sub_group_shuffle(origin_input_0[bi / 2][0], (bi % 2) * 8 + ki),
+                                                            _sub_group_shuffle(origin_input_0[bi / 2][1], (bi % 2) * 8 + ki),
+                                                            _sub_group_shuffle(origin_input_0[bi / 2][2], (bi % 2) * 8 + ki),
+                                                            _sub_group_shuffle(origin_input_0[bi / 2][3], (bi % 2) * 8 + ki)};
+
+                    // [TEST] : scaling
+                    MAKE_FLOAT_VEC(4) quantized_origin_input_val = (convert_float4)(origin_input_val) / (float4)de_quantize_scale[bi];
+                    // [TEST] : Fake quantizing
+                    MAKE_DQ_TYPE_VEC(4) char_type_origin_input = CAT(CAT(convert_, MAKE_VECTOR_TYPE(DQ_TYPE, INPUT_LOAD_SIZE)), _rte)(quantized_origin_input_val);
+                    quantized_origin_input_val = (convert_float4)(char_type_origin_input);
+
+                    // [TEST]
+                    temp_acc_tmp[0][bi] = imad_SW(acc_tmp[0][bi], char_type_origin_input, first_weight);
+                    temp_acc_tmp[1][bi] = imad_SW(acc_tmp[1][bi], char_type_origin_input, second_weight);
+                }
+                #endif
             }
 
             weights_offset += TILE_K_OFM_PACKED * TILE_OFM_PER_OSV_SIZE * SIMD;
@@ -1125,8 +1201,10 @@ inline void FUNC(fc_bf_tiled_kernel_dyn_quan)(
                         #if COMPRESSED_WEIGHTS_INT8
                             ACCUM_DQ_TYPE modified_calc_buff = ((int *)(&acc_tmp[fi]))[bi] - ((float)(wei_zp[fi]) * (convert_float)(activation_sum[bi]));
                             ((ACCUMULATOR_TYPE*)(&acc[bi]))[fi] += (convert_half)(convert_float(modified_calc_buff) * (float)ds * (float)de_quantize_scale[bi]);
+                            // ((float*)(&acc[bi]))[fi] += (convert_float(modified_calc_buff) * (float)ds * (float)de_quantize_scale[bi]);
                         #else
                             ((ACCUMULATOR_TYPE*)(&acc[bi]))[fi] += convert_half(((int *)(&acc_tmp[fi]))[bi]) * ds * de_quantize_scale[bi];
+                            // ((float*)(&acc[bi]))[fi] += convert_float(((int *)(&acc_tmp[fi]))[bi]) * ds * de_quantize_scale[bi];
                         #endif
                         acc_tmp[fi][bi] = 0;
                     }
@@ -1136,7 +1214,12 @@ inline void FUNC(fc_bf_tiled_kernel_dyn_quan)(
 
         #if DQ_DECOMPRESSION_SCALE_POST_OP && (TILE_IFM_ELEMENTS_SIZE <= DECOMPRESSION_SCALE_GROUP_SIZE)
             // Dynamic-quantizing group size set to same or smaller than scale group size
-            if ((ni % NUM_LOOP_IN_DYN_QUAN_GROUP) == (NUM_LOOP_IN_DYN_QUAN_GROUP - 1)) {
+            if (((ni % NUM_LOOP_IN_DYN_QUAN_GROUP) == (NUM_LOOP_IN_DYN_QUAN_GROUP - 1))) {
+                // if (get_global_id(0) == 0 && get_global_id(2) == 0) {
+                //     printf(">> Post process : ni(%u) DECOMPRESSION_SCALE_GROUP_SIZE(%d) de_quantize_scale[0]:(%.3f) (int *)(&acc_tmp[fi]))[0]:(%d/%d) \n",
+                //             ni, (int)DECOMPRESSION_SCALE_GROUP_SIZE,
+                //             (float)de_quantize_scale[0], (int)(((int *)(&acc_tmp[0]))[0]), (int)(((int *)(&acc_tmp[1]))[0]));
+                // }
                 const uint ni_offset = ((ni*TILE_IFM*SIMD) / DECOMPRESSION_SCALE_GROUP_SIZE)*DECOMPRESSION_SCALE_FEATURE_PITCH;
                 unroll_for (uint bi = 0; bi < TILE_B; ++bi) {
                     unroll_for(uint fi = 0; fi < TILE_OFM; ++fi) {
@@ -1152,8 +1235,10 @@ inline void FUNC(fc_bf_tiled_kernel_dyn_quan)(
                         #if COMPRESSED_WEIGHTS_INT8
                             ACCUM_DQ_TYPE modified_calc_buff = ((int *)(&acc_tmp[fi]))[bi] - ((float)(wei_zp[fi]) * (convert_float)(activation_sum[bi]));
                             ((ACCUMULATOR_TYPE*)(&acc[bi]))[fi] += (convert_half)(convert_float(modified_calc_buff) * (float)ds * (float)de_quantize_scale[bi]);
+                            // ((float*)(&acc[bi]))[fi] += (convert_float(modified_calc_buff) * (float)ds * (float)de_quantize_scale[bi]);
                         #else
                             ((ACCUMULATOR_TYPE*)(&acc[bi]))[fi] += convert_half(((int *)(&acc_tmp[fi]))[bi]) * ds * de_quantize_scale[bi];
+                            // ((float*)(&acc[bi]))[fi] += convert_float(((int *)(&acc_tmp[fi]))[bi]) * ds * de_quantize_scale[bi];
                         #endif
                         acc_tmp[fi][bi] = 0;
                     }
@@ -1264,7 +1349,9 @@ KERNEL(fc)(
 #endif
 #if DYNAMIC_QUANTIZE
     , __global DQ_TYPE* quantized_input
-    , __global INPUT0_TYPE* quan_var
+    // [TEST]
+    // , __global INPUT0_TYPE* quan_var
+    , __global float* quan_var
 #endif
 ) {
 #if USE_SLM
