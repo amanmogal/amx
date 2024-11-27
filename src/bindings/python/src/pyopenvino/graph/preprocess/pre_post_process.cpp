@@ -550,7 +550,14 @@ void regclass_graph_PrePostProcessor(py::module m) {
         "PrePostProcessor");
     proc.doc() = "openvino.runtime.preprocess.PrePostProcessor wraps ov::preprocess::PrePostProcessor";
 
-    proc.def(py::init<const std::shared_ptr<ov::Model>&>(), py::arg("model"));
+    proc.def(py::init([](const py::object& ie_api_model) {
+                 const auto model = ie_api_model.attr("_Model__model").cast<std::shared_ptr<ov::Model>>();
+                 return std::make_shared<ov::preprocess::PrePostProcessor>(model);
+             }),
+             py::arg("model"),
+             R"(
+             It creates PrePostProcessor.
+    )");
 
     proc.def("input", [](ov::preprocess::PrePostProcessor& self) {
         return &self.input();
@@ -588,7 +595,15 @@ void regclass_graph_PrePostProcessor(py::module m) {
         },
         py::arg("output_index"));
 
-    proc.def("build", &ov::preprocess::PrePostProcessor::build, py::call_guard<py::gil_scoped_release>());
+    proc.def("build", [](ov::preprocess::PrePostProcessor& self) {
+        std::shared_ptr<ov::Model> model;
+        {
+            py::gil_scoped_release release;
+            model = self.build();
+        }
+        py::type model_class = py::module_::import("openvino.runtime").attr("Model");
+        return model_class(py::cast(model));
+    });
 
     proc.def("__str__", [](const ov::preprocess::PrePostProcessor& self) -> std::string {
         std::stringstream ss;
