@@ -4,12 +4,11 @@
 
 #include "if.h"
 
+#include "nodes/node_config.h"
 #include "openvino/op/if.hpp"
 
-#include "common/cpu_memcpy.h"
 #include "shape_inference/shape_inference_internal_dyn.hpp"
 #include "nodes/common/cpu_convert.h"
-#include "transformations/utils/utils.hpp"
 
 #include <string>
 #include <vector>
@@ -70,22 +69,55 @@ bool If::isSupportedOperation(const std::shared_ptr<const ov::Node>& op, std::st
 }
 
 If::If(const std::shared_ptr<ov::Node>& op, const GraphContext::CPtr context) :
-        Node(op, context, InternalDynShapeInferFactory()), ovOp(op) {
+        Node(op, context, InternalDynShapeInferFactory()), m_op(op) {
     std::string errorMessage;
     if (!isSupportedOperation(op, errorMessage)) {
         OPENVINO_THROW_NOT_IMPLEMENTED(errorMessage);
     }
 }
 
-void If::getSupportedDescriptors() {
-    auto ifOp = ov::as_type_ptr<ov::op::v8::If>(ovOp);
+void If::initSupportedPrimitiveDescriptors() {
+    if (!supportedPrimitiveDescriptors.empty())
+        return;
 
-    const std::shared_ptr<const ov::Model>& thenBody = ifOp->get_then_body();
-    const std::shared_ptr<const ov::Model>& elseBody = ifOp->get_else_body();
-    subGraphThen.CreateGraph(thenBody, context);
-    subGraphElse.CreateGraph(elseBody, context);
+    auto ifOp = ov::as_type_ptr<ov::op::v8::If>(m_op);
 
-    const auto& inMapThen = subGraphThen.GetInputNodesMap();
+    m_thenGraph.Init(ifOp->get_then_body(), context);
+    m_elseGraph.Init(ifOp->get_else_body(), context);
+
+    NodeConfig config;
+    config.inConfs.reserve(getParentEdges().size());
+    config.outConfs.reserve(getChildEdges().size());
+
+    for (size_t i = 0; i < inputShapes.size(); i++) {
+        PortConfig dataConf {};
+        auto descCreator = BlockedDescCreator::getCommonCreators().at(LayoutType::ncsp);
+        dataConf.setMemDesc(descCreator->createSharedDesc(getOriginalInputPrecisionAtPort(i), getInputShapeAtPort(i)));
+        config.inConfs.emplace_back(dataConf);
+    }
+
+    for (size_t i = 0; i < outputShapes.size(); i++) {
+        PortConfig dataConf {};
+        auto descCreator = BlockedDescCreator::getCommonCreators().at(LayoutType::ncsp);
+        dataConf.setMemDesc(descCreator->createSharedDesc(getOriginalOutputPrecisionAtPort(i), getOutputShapeAtPort(i)));
+        config.outConfs.push_back(dataConf);
+    }
+
+    supportedPrimitiveDescriptors.emplace_back(config, impl_desc_type::unknown);
+}
+
+int If::registerToAllocationContext(int offset, AllocationContext& context) {
+    offset = m_thenGraph.RegisterToAllocationContext(offset, context);
+    return m_elseGraph.RegisterToAllocationContext(offset, context);
+}
+
+void If::createPrimitive() {
+    m_thenGraph.Activate();
+    m_elseGraph.Activate();
+
+    auto ifOp = ov::as_type_ptr<ov::op::v8::If>(m_op);
+
+    const auto& inMapThen = m_thenGraph.GetInputNodesMap();
     for (const auto& param : ifOp->get_then_body()->get_parameters()) {
         auto inNode = inMapThen.find(ifOp->get_then_body()->get_parameter_index(param));
         if (inNode != inMapThen.end()) {
@@ -98,7 +130,7 @@ void If::getSupportedDescriptors() {
         }
     }
 
-    const auto& inMapElse = subGraphElse.GetInputNodesMap();
+    const auto& inMapElse = m_elseGraph.GetInputNodesMap();
     for (const auto& param : ifOp->get_else_body()->get_parameters()) {
         auto inNode = inMapElse.find(ifOp->get_else_body()->get_parameter_index(param));
         if (inNode != inMapElse.end()) {
@@ -111,7 +143,7 @@ void If::getSupportedDescriptors() {
         }
     }
 
-    const auto &outMapThen = subGraphThen.GetOutputNodesMap();
+    const auto &outMapThen = m_thenGraph.GetOutputNodesMap();
     for (const auto& out : ifOp->get_then_body()->get_results()) {
         auto outNode = outMapThen.find(ifOp->get_then_body()->get_result_index(out));
         if (outNode != outMapThen.end()) {
@@ -122,7 +154,7 @@ void If::getSupportedDescriptors() {
         }
     }
 
-    const auto &outMapElse = subGraphElse.GetOutputNodesMap();
+    const auto &outMapElse = m_elseGraph.GetOutputNodesMap();
     for (const auto& out : ifOp->get_else_body()->get_results()) {
         auto outNode = outMapElse.find(ifOp->get_else_body()->get_result_index(out));
         if (outNode != outMapElse.end()) {
@@ -155,34 +187,7 @@ void If::getSupportedDescriptors() {
         elseInputPortMap.emplace_back(PortMap {
             static_cast<int>(desc->m_input_index), static_cast<int>(body_input_index)});
     }
-}
 
-void If::initSupportedPrimitiveDescriptors() {
-    if (!supportedPrimitiveDescriptors.empty())
-        return;
-
-    NodeConfig config;
-    config.inConfs.reserve(getParentEdges().size());
-    config.outConfs.reserve(getChildEdges().size());
-
-    for (size_t i = 0; i < inputShapes.size(); i++) {
-        PortConfig dataConf {};
-        auto descCreator = BlockedDescCreator::getCommonCreators().at(LayoutType::ncsp);
-        dataConf.setMemDesc(descCreator->createSharedDesc(getOriginalInputPrecisionAtPort(i), getInputShapeAtPort(i)));
-        config.inConfs.emplace_back(dataConf);
-    }
-
-    for (size_t i = 0; i < outputShapes.size(); i++) {
-        PortConfig dataConf {};
-        auto descCreator = BlockedDescCreator::getCommonCreators().at(LayoutType::ncsp);
-        dataConf.setMemDesc(descCreator->createSharedDesc(getOriginalOutputPrecisionAtPort(i), getOutputShapeAtPort(i)));
-        config.outConfs.push_back(dataConf);
-    }
-
-    supportedPrimitiveDescriptors.emplace_back(config, impl_desc_type::unknown);
-}
-
-void If::createPrimitive() {
     const auto& eng = getEngine();
     prepareBeforeMappers(true, eng);
     prepareBeforeMappers(false, eng);
@@ -248,12 +253,14 @@ void If::execute(dnnl::stream strm) {
 
     auto& beforeMappers = condition ? beforeThenMappers : beforeElseMappers;
     auto& afterMappers = condition ? afterThenMappers : afterElseMappers;
-    auto& subGraph = condition ? subGraphThen : subGraphElse;
+    auto& subGraph = condition ? m_thenGraph : m_elseGraph;
 
     for (auto &mapper : beforeMappers)
         mapper->execute(strm);
+
     subGraph.ResetInferCount();
     subGraph.Infer();
+
     for (auto &mapper : afterMappers)
         mapper->execute(strm);
 }

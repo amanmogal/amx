@@ -8,7 +8,6 @@
 #include "common/reorder_prim.h"
 #include "dnnl_extension_utils.h"
 #include "shape_inference/shape_inference_internal_dyn.hpp"
-#include "transformations/utils/utils.hpp"
 #include "utils/general_utils.h"
 #include "utils/debug_capabilities.h"
 #include "openvino/op/tensor_iterator.hpp"
@@ -402,25 +401,33 @@ TensorIterator::TensorIterator(const std::shared_ptr<ov::Node>& op, const GraphC
     }
 }
 
-void TensorIterator::getSupportedDescriptors() {
-    auto tiOp = ov::as_type_ptr<const ov::op::util::SubGraphOp>(ngraphOp);
-    if (!tiOp) {
-        THROW_ERROR("cannot be cast to ov::op::util::SubGraphOp");
-    }
-    const std::shared_ptr<const ov::Model> body = tiOp->get_function();
-    sub_graph.CreateGraph(body, context);
+void TensorIterator::initSupportedPrimitiveDescriptors() {
+    auto subgraphOp = ov::as_type_ptr<const ov::op::util::SubGraphOp>(ngraphOp);
+
+    sub_graph.Init(subgraphOp->get_function(), context);
+
+    if (!supportedPrimitiveDescriptors.empty())
+        return;
+
+    supportedPrimitiveDescriptors.emplace_back(make_plain_config(ngraphOp), impl_desc_type::unknown);
+}
+
+void TensorIterator::createPrimitive() {
+    sub_graph.Activate();
+
+    auto subgraphOp = ov::as_type_ptr<const ov::op::util::SubGraphOp>(ngraphOp);
 
     const auto &inMap = sub_graph.GetInputNodesMap();
-    for (const auto &param : tiOp->get_function()->get_parameters()) {
-        auto inNode = inMap.find(tiOp->get_function()->get_parameter_index(param));
+    for (const auto &param : subgraphOp->get_function()->get_parameters()) {
+        auto inNode = inMap.find(subgraphOp->get_function()->get_parameter_index(param));
         if (inNode != inMap.end()) {
             input_mems.push_back(getToMemories(inNode->second.get(), 0));
         }
     }
 
     const auto &outMap = sub_graph.GetOutputNodesMap();
-    for (const auto &out : tiOp->get_function()->get_results()) {
-        auto outNode = outMap.find(tiOp->get_function()->get_result_index(out));
+    for (const auto &out : subgraphOp->get_function()->get_results()) {
+        auto outNode = outMap.find(subgraphOp->get_function()->get_result_index(out));
         if (outNode != outMap.end()) {
             auto outMem = outNode->second->getSrcMemoryAtPort(0);
             output_mem.push_back(outMem);
@@ -428,7 +435,7 @@ void TensorIterator::getSupportedDescriptors() {
     }
 
     // Port map: outputs
-    for (const auto& desc : tiOp->get_output_descriptions()) {
+    for (const auto& desc : subgraphOp->get_output_descriptions()) {
         auto body_output_idx = desc->m_body_value_index;
 
         std::string type_name = desc->get_type_info().name;
@@ -453,7 +460,7 @@ void TensorIterator::getSupportedDescriptors() {
     }
 
     // Port map : inputs and back edges
-    for (const auto& desc : tiOp->get_input_descriptions()) {
+    for (const auto& desc : subgraphOp->get_input_descriptions()) {
         auto body_input_index = desc->m_body_parameter_index;
 
         if (auto slice_desc = ov::as_type_ptr<const ov::op::util::SubGraphOp::SliceInputDescription>(desc)) {
@@ -494,16 +501,7 @@ void TensorIterator::getSupportedDescriptors() {
     } else {
         THROW_ERROR("isn't supported!");
     }
-}
 
-void TensorIterator::initSupportedPrimitiveDescriptors() {
-    if (!supportedPrimitiveDescriptors.empty())
-        return;
-
-    supportedPrimitiveDescriptors.emplace_back(make_plain_config(ngraphOp), impl_desc_type::unknown);
-}
-
-void TensorIterator::createPrimitive() {
     if (loopBodyConditionOutputIdx == -1)
         continue_cond_check.reset(new staticValueCheck(true)); // always true
     if (loopExecutionConditionIdx == -1) {
@@ -519,6 +517,10 @@ void TensorIterator::createPrimitive() {
         prepareParamsImpl(compileStage);
         updateLastInputDims();
     }
+}
+
+int TensorIterator::registerToAllocationContext(int offset, AllocationContext& context) {
+    return sub_graph.RegisterToAllocationContext(offset, context);
 }
 
 bool TensorIterator::needPrepareParams() const {
@@ -875,7 +877,6 @@ int TensorIterator::getNumIteration(const std::vector<PortMap>& inputPortMap, co
 
         return static_cast<int>(length / step);
     };
-
 
     int numIterations = 1;
     bool isDefault = true;

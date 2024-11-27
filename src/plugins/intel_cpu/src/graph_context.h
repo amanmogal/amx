@@ -18,6 +18,7 @@ namespace node {
 class MemoryStatesRegister;
 } // namespace node
 
+class MemoryControl;
 class NetworkMemoryControl;
 
 class GraphContext {
@@ -28,6 +29,7 @@ public:
     GraphContext(const Config& config,
                  WeightsSharing::Ptr w_cache,
                  bool isGraphQuantized,
+                 std::shared_ptr<MemoryControl> memoryControl,
                  ov::threading::IStreamsExecutor::Ptr streamExecutor = nullptr,
                  std::shared_ptr<SubMemoryManager> sub_memory_manager = nullptr);
 
@@ -78,8 +80,8 @@ public:
         return memoryStatesRegister;
     }
 
-    const std::shared_ptr<NetworkMemoryControl>& getNetworkMemoryControl() const {
-        return networkMemoryControl;
+    const std::shared_ptr<MemoryControl>& getMemoryControl() const {
+        return memoryControl;
     }
 
 private:
@@ -103,7 +105,8 @@ private:
     int numNumaNodes = 1;
 
     std::shared_ptr<node::MemoryStatesRegister> memoryStatesRegister;
-    std::shared_ptr<NetworkMemoryControl> networkMemoryControl;
+
+    std::shared_ptr<MemoryControl> memoryControl;
 };
 
 }  // namespace intel_cpu
