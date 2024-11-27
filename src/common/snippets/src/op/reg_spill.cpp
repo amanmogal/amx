@@ -12,7 +12,20 @@ namespace op {
 
 RegSpillBase::RegSpillBase(const std::vector<Output<Node>> &args) : Op(args) {}
 
-RegSpillBegin::RegSpillBegin() {
+bool RegSpillBase::visit_attributes(AttributeVisitor &visitor) {
+    std::stringstream ss;
+    const auto& regs_to_spill = get_regs_to_spill();
+    for (auto reg_it = regs_to_spill.begin(); reg_it != regs_to_spill.end(); reg_it++) {
+        ss << *reg_it;
+        if (std::next(reg_it) != regs_to_spill.end())
+            ss << ", ";
+    }
+    std::string spilled = ss.str();
+    visitor.on_attribute("regs_to_spill", spilled);
+    return true;
+}
+
+RegSpillBegin::RegSpillBegin(std::set<Reg> regs_to_spill) : m_regs_to_spill(std::move(regs_to_spill)) {
     validate_and_infer_types_except_RegSpillEnd();
 }
 
@@ -32,7 +45,7 @@ void RegSpillBegin::validate_and_infer_types() {
 
 std::shared_ptr<Node> RegSpillBegin::clone_with_new_inputs(const OutputVector& inputs) const {
     OPENVINO_ASSERT(inputs.empty(), "RegSpillBegin should not contain inputs");
-    return std::make_shared<RegSpillBegin>();
+    return std::make_shared<RegSpillBegin>(m_regs_to_spill);
 }
 
 std::shared_ptr<RegSpillEnd> RegSpillBegin::get_reg_spill_end() const {
@@ -43,9 +56,7 @@ std::shared_ptr<RegSpillEnd> RegSpillBegin::get_reg_spill_end() const {
     return loop_end;
 }
 
-RegSpillEnd::RegSpillEnd(const Output<Node>& reg_spill_begin, std::set<Reg> regs_to_spill)  :
-        RegSpillBase({reg_spill_begin}),
-        m_regs_to_spill(std::move(regs_to_spill)) {
+RegSpillEnd::RegSpillEnd(const Output<Node>& reg_spill_begin) : RegSpillBase({reg_spill_begin}) {
     constructor_validate_and_infer_types();
 }
 
@@ -55,27 +66,9 @@ void RegSpillEnd::validate_and_infer_types() {
     set_output_type(0, element::f32, ov::PartialShape{});
 }
 
-bool RegSpillEnd::visit_attributes(AttributeVisitor &visitor) {
-    std::stringstream ss;
-    for (auto reg_it = m_regs_to_spill.begin(); reg_it != m_regs_to_spill.end(); reg_it++) {
-        ss << *reg_it;
-        if (std::next(reg_it) != m_regs_to_spill.end())
-            ss << ", ";
-    }
-    std::string spilled = ss.str();
-    visitor.on_attribute("regs_to_spill", spilled);
-    return true;
-}
-
 std::shared_ptr<Node> RegSpillEnd::clone_with_new_inputs(const OutputVector& inputs) const {
     check_new_args_count(this, inputs);
-    return std::make_shared<RegSpillEnd>(inputs.at(0), m_regs_to_spill);
-}
-
-std::shared_ptr<RegSpillBegin> RegSpillEnd::get_reg_spill_begin() {
-    const auto& reg_spill_begin = ov::as_type_ptr<RegSpillBegin>(get_input_source_output(0).get_node_shared_ptr());
-    OPENVINO_ASSERT(reg_spill_begin, "RegSpillEnd last input is not connected to RegSpillBegin");
-    return reg_spill_begin;
+    return std::make_shared<RegSpillEnd>(inputs.at(0));
 }
 
 

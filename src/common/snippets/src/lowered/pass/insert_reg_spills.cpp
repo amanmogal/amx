@@ -39,8 +39,8 @@ bool InsertRegSpills::run(LinearIR& linear_ir) {
 //            insert_pos--;
 //            num_loops++;
 //        }
-        const auto begin = std::make_shared<op::RegSpillBegin>();
-        const auto end = std::make_shared<op::RegSpillEnd>(begin, regs_to_spill);
+        const auto begin = std::make_shared<op::RegSpillBegin>(regs_to_spill);
+        const auto end = std::make_shared<op::RegSpillEnd>(begin);
         const auto spill_begin_expr = *linear_ir.insert_node(begin, std::vector<PortConnectorPtr>{}, expr->get_loop_ids(),
                                                              false, insert_pos, std::vector<std::set<ExpressionPort>>{});
         std::vector<Reg> vregs{regs_to_spill.begin(), regs_to_spill.end()};
