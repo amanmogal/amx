@@ -480,7 +480,6 @@ std::vector<std::string> disabledTestPatterns() {
     // int8 / code-generation specific
     retVector.emplace_back(R"(smoke_LPT.*)");
     // Compressed weights are not supported
-    retVector.emplace_back(R"(smoke_MatMulCompressedWeights.*)");
     retVector.emplace_back(R"(smoke_MatMulSharedCompressedWeights.*)");
     retVector.emplace_back(R"(smoke_MatmulAndGatherSharedWeightsDecompression.*)");
     // smoke_Snippets test cases are not supported on arm32 platforms
@@ -618,7 +617,7 @@ std::vector<std::string> disabledTestPatterns() {
         // by calc abs_threshold with expected value
         retVector.emplace_back(R"(.*smoke_GatherCompressedWeights_basic/GatherWeightsDecompression.CompareWithRefs.*INFERENCE_PRECISION_HINT.*bf16.*)");
         retVector.emplace_back(R"(.*smoke_Interaction/IntertactionCPUTest.CompareWithRefs.*Prc=i32.*)");
-        retVector.emplace_back(R"(.*smoke_MatMulCompressedWeights_(amx|sym_amx|corner_cases_amx)/MatmulWeightsDecompression.CompareWithRefs.*INFERENCE_PRECISION_HINT.*bf16.*)");
+        retVector.emplace_back(R"(.*smoke_MatMulCompressedWeights_(sym_amx)/MatmulWeightsDecompression.CompareWithRefs.*INFERENCE_PRECISION_HINT.*bf16.*)");
         retVector.emplace_back(R"(.*smoke_Snippets_EnforcePrecision_bf16/EnforcePrecisionTest.*)");
         retVector.emplace_back(R"(.*smoke_Snippets_MHABF16_4D/MHA.CompareWithRefImpl/.*\[1.58.16.34\]_IS\[1\]=\[1.58.16.34\]_IS\[2\]=\[1.1.1.58\]_IS\[3\]=\[1.58.16.34\].*)");
         retVector.emplace_back(R"(.*smoke_Snippets_MHAWOTransposeBF16_(3|4)D/MHAWOTranspose.*)");

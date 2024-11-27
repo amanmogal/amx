@@ -13,6 +13,8 @@ struct MatMulAttrs {
     bool transposeA;
     bool transposeB;
     std::vector<float> dequantizationScales;
+    MemoryCPtr decompressionSubtractPtr;
+    MemoryCPtr decompressionMultiplyPtr;
 };
 
 using MatMulConfig = executor::Config<MatMulAttrs>;

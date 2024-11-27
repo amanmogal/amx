@@ -293,19 +293,32 @@ void GraphOptimizer::FuseConvMatmulFCDeconvAndDQScales(Graph &graph) {
 }
 
 void GraphOptimizer::FuseFCAndWeightsDecompression(Graph &graph) {
-    std::set<ov::element::Type> supportedWeightsPrecisions{
-        ov::element::u8, ov::element::i8, ov::element::nf4, ov::element::u4, ov::element::i4, ov::element::f4e2m1};
-    const std::set<ov::element::Type> supportedDataPrecisions{ov::element::f32, ov::element::bf16};
+    using ov::element::Type_t;
+
     auto expectedNode = [](NodePtr node, Type expectedType) {
         return node->getType() == expectedType && node->getChildEdges().size() == 1;
     };
 
+    std::set<ov::element::Type> supportedWeightsPrecisions;
+    std::set<ov::element::Type> supportedDataPrecisions;
+
+    bool useMatmulPrim = false;
+    CPU_DEBUG_CAP_ENABLE(useMatmulPrim = getEnvBool("OV_CPU_ENABLE_DNNL_MAMTUL_FOR_FC");)
+
+    if (useMatmulPrim) {
+        supportedWeightsPrecisions = {Type_t::u8, Type_t::i8};
+        supportedDataPrecisions = {Type_t::f32, Type_t::bf16, Type_t::f16};
+    } else {
+        supportedWeightsPrecisions = {Type_t::u8, Type_t::i8, Type_t::nf4, Type_t::u4, Type_t::i4, Type_t::f4e2m1};
+        supportedDataPrecisions = {Type_t::f32, Type_t::bf16};
+
+        if (!impl::cpu::x64::mayiuse(impl::cpu::x64::avx2))
+            return;
+    }
+
 #define SKIP_FUSION_FOR_NODE(node)                                                   \
     DEBUG_LOG("FuseFCAndWeightsDecompression can't be applied for node ", node->getName()); \
     continue
-
-    if (!impl::cpu::x64::mayiuse(impl::cpu::x64::avx2))
-        return;
 
     auto& graphNodes = graph.GetNodes();
     for (size_t i = 0; i < graphNodes.size(); i++) {
@@ -381,10 +394,6 @@ void GraphOptimizer::FuseFCAndWeightsDecompression(Graph &graph) {
             SKIP_FUSION_FOR_NODE(fcNode);
         }
         if (supportedWeightsPrecisions.find(weightsNode->getOriginalOutputPrecisionAtPort(0)) == supportedWeightsPrecisions.end()) {
-            SKIP_FUSION_FOR_NODE(fcNode);
-        }
-        if (withSubtract &&
-            !one_of(subtractConstNode->getOriginalOutputPrecisionAtPort(0), weightsNode->getOriginalOutputPrecisionAtPort(0), ov::element::f32)) {
             SKIP_FUSION_FOR_NODE(fcNode);
         }
 
