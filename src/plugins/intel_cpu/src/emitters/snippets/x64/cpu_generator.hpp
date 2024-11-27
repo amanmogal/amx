@@ -37,7 +37,8 @@ public:
     bool is_supported() const override;
     snippets::CompiledSnippetPtr get_snippet() override;
     size_t get_lanes() const override;
-    size_t get_reg_count() const override;
+    size_t get_gp_reg_count() const override;
+    size_t get_vec_reg_count() const override;
     dnnl::impl::cpu::x64::cpu_isa_t get_isa() const;
 #ifdef SNIPPETS_DEBUG_CAPS
     SnippetsDebugCapsConfig debug_config;

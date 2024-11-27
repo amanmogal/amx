@@ -57,10 +57,15 @@ public:
     virtual size_t get_lanes() const = 0;
 
     /**
-     * @brief gets number of registers for a target machine
+     * @brief returns the number of available general-purpose registers.
      * @return number of registers
      */
-    virtual size_t get_reg_count() const = 0;
+    virtual size_t get_gp_reg_count() const = 0;
+    /**
+    * @brief returns the number of available vector registers.
+    * @return number of registers
+    */
+    virtual size_t get_vec_reg_count() const = 0;
 
     /**
      * @brief called by generator to all the emitter for a target machine
