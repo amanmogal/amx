@@ -256,6 +256,14 @@ def generate_model_with_memory(input_shape, data_type) -> openvino._pyopenvino.M
     return model
 
 
+def generate_big_model_with_tile(input_shape, constant_shape, tile_shape, data_type) -> openvino._pyopenvino.Model:
+    input_data = ops.parameter(input_shape, name="input_data", dtype=data_type)
+    init_val = ops.constant(np.ones(constant_shape, np.float32), data_type)
+    tile = ops.tile(input_data, tile_shape)
+    add = ops.add(init_val, tile, name="MemoryAdd")
+    return Model(add, [input_data], "TestModel")
+
+
 def generate_concat_compiled_model(device, input_shape: List[int] = None, ov_type=Type.f32, numpy_dtype=np.float32):
     if input_shape is None:
         input_shape = [5]

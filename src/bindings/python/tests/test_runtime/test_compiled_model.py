@@ -12,12 +12,13 @@ from tests.utils.helpers import (
     generate_model_and_image,
     generate_concat_compiled_model,
     generate_relu_compiled_model,
+    generate_big_model_with_tile,
     generate_relu_compiled_model_with_config,
     encrypt_base64,
     decrypt_base64,
     create_filenames_for_ir,
     create_filename_for_test)
-from openvino import Model, Shape, Core, Tensor, serialize
+from openvino import Model, Shape, Core, Tensor, serialize, Type
 from openvino.runtime import ConstOutput
 
 import openvino.runtime.opset13 as ops
@@ -97,6 +98,24 @@ def test_export_import_advanced(device):
     res = new_compiled.infer_new_request({"data": img})
 
     assert np.argmax(res[new_compiled.outputs[0]]) == 531
+
+
+def test_export_import_large_model(device):
+    import io
+    core = Core()
+    if props.device.Capability.EXPORT_IMPORT not in core.get_property(device, props.device.capabilities):
+        pytest.skip(f"{core.get_property(device, props.device.full_name)} plugin due-to export, import model API isn't implemented.")
+
+    # model of size of roughly 2.01GB
+    model = generate_big_model_with_tile([1, 10, 9], [6, 10000, 9000], [6, 1000, 1000], Type.f32)
+    core = Core()
+    compiled_model = core.compile_model(model, device, {})
+    user_stream = io.BytesIO()
+    compiled_model.export_model(user_stream)
+    new_compiled = core.import_model(user_stream, device)
+    img = generate_image([1, 10, 9])
+    res = new_compiled.infer_new_request({"input_data": img})
+    assert np.argmax(res[new_compiled.outputs[0]]) == 63006
 
 
 # request - https://docs.pytest.org/en/7.1.x/reference/reference.html#request
