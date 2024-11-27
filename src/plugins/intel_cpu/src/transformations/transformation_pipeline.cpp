@@ -94,6 +94,7 @@
 #include "transformations/op_conversions/convert_topk3.hpp"
 #include "transformations/op_conversions/convert_topk11_downgrade.hpp"
 #include "transformations/op_conversions/scaled_dot_product_attention_decomposition.hpp"
+#include "transformations/op_conversions/convert_convertlike.hpp"
 #include "transformations/opset_conversions/convert_opset2_to_opset1.hpp"
 #include "transformations/opset_conversions/convert_opset3_to_opset2.hpp"
 #include "transformations/smart_reshape/matmul_sr.hpp"
@@ -141,7 +142,6 @@
 #include "transformations/cpu_opset/common/pass/swap_convert_transpose.hpp"
 #include "transformations/cpu_opset/common/pass/causal_mask_preprocess_fusion.hpp"
 #include "transformations/cpu_opset/common/pass/stateful_sdpa_fusion.hpp"
-#include "transformations/cpu_opset/x64/pass/sdpa_fuse_transpose_reshape.hpp"
 
 // Snippets
 #include "snippets/pass/tokenization.hpp"
@@ -618,14 +618,6 @@ void Transformations::PreLpt(const std::vector<ov::element::Type>& defaultPrecis
     CPU_SET_CALLBACK_COMMON(manager, nmsCallback, ov::pass::ConvertNMS9ToNMSIEInternal);
     CPU_SET_CALLBACK_COMMON(manager, nmsCallback, ov::pass::ConvertMulticlassNmsToMulticlassNmsIE);
     CPU_SET_CALLBACK_COMMON(manager, nmsCallback, ov::pass::ConvertMatrixNmsToMatrixNmsIE);
-    CPU_SET_CALLBACK_COMMON(manager,
-        [this](const_node_ptr &node) -> bool {
-            std::string errorMsg;
-            // Current SDPA impl is optimized only for LLM models, so we decompose it for others to avoid perf regression.
-            // Matching the pattern is a little complicated, so we just check if there is any state nodes.
-            return node::ScaledDotProductAttention::isSupportedOperation(node, errorMsg) && model->get_variables().size() > 0;
-        },
-        ov::pass::ScaledDotProductAttentionDecomposition);
 
     // List of enabled/disabled transformations
 
@@ -659,6 +651,7 @@ void Transformations::PreLpt(const std::vector<ov::element::Type>& defaultPrecis
     CPU_DISABLE_PASS_COMMON(manager, ov::pass::MatMulConstTransposesExtraction);
     CPU_DISABLE_PASS_COMMON(manager, ov::pass::ConvertScatterNDUpdate15ToScatterNDUpdate3);
     CPU_DISABLE_PASS_COMMON(manager, ov::pass::ConvertSliceScatter);
+    CPU_DISABLE_PASS_COMMON(manager, ov::pass::ScaledDotProductAttentionDecomposition);
     CPU_DISABLE_PASS_X64(manager, ov::pass::HSigmoidDecomposition);
 
     CPU_DISABLE_PASS_X64(manager, ov::pass::ReduceL1Decomposition);
@@ -883,8 +876,17 @@ void Transformations::PostLpt() {
 #endif // OPENVINO_ARCH_X86_64
 
     CPU_REGISTER_PASS_COMMON(postLPTPassManager, ov::pass::transpose_sinking::TSShapeOfForward);
-    CPU_REGISTER_PASS_COMMON(postLPTPassManager, StatefulSDPAFusion);
-    CPU_REGISTER_PASS_X64(postLPTPassManager, ov::intel_cpu::SDPAFuseTransposeReshape);
+    CPU_REGISTER_PASS_COMMON(postLPTPassManager, ov::intel_cpu::StatefulSDPAFusion);
+
+    // If the SDPA patterns haven't been fused into the special CPU optimized SDPA nodes, we have to decompose
+    // these layers and run some auxilary transformation passes to let the snippets handle SDPA ops
+
+    CPU_REGISTER_PASS_COMMON(postLPTPassManager, ov::pass::ScaledDotProductAttentionDecomposition);
+    CPU_REGISTER_PASS_COMMON(postLPTPassManager, ov::pass::ConvertConvertLike);
+    CPU_REGISTER_PASS_COMMON(postLPTPassManager, ov::pass::ConstantFolding);
+    CPU_REGISTER_PASS_COMMON(postLPTPassManager, ov::pass::MoveEltwiseUpThroughDataMov);
+    CPU_REGISTER_PASS_COMMON(postLPTPassManager, ov::pass::TransposeMatMul);
+
     CPU_REGISTER_PASS_X64(postLPTPassManager, ov::pass::RMSFusion, false);
     CPU_REGISTER_PASS_X64(postLPTPassManager, ov::intel_cpu::DecomposeRMSNorm);
     CPU_SET_CALLBACK_X64(postLPTPassManager,
