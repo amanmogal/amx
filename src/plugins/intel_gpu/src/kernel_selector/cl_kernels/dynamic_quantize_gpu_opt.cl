@@ -15,6 +15,46 @@
 #define AS_TYPE_N(type, n, x) AS_TYPE_N_(type, n, x)
 #define AS_INPUT_TYPE_N(x) AS_TYPE_N(INPUT0_TYPE, VEC_SIZE, x)
 
+#if QUANTIZE_GROUP_SIZE <= 128
+KERNEL(dynamic_quantize_gpu_opt)(
+    OPTIONAL_SHAPE_INFO_ARG
+    const __global INPUT0_TYPE* input,
+    __global OUTPUT_TYPE* output,
+    __global OUTPUT1_TYPE* output_scale) {
+    const uint bf = get_global_id(0);
+    const uint b = bf / INPUT0_FEATURE_NUM;
+    const uint f = bf % INPUT0_FEATURE_NUM;
+    const uint y_grp = get_global_id(1);
+
+    const uint input_offset = INPUT0_GET_INDEX(b, f, y_grp * QUANTIZE_GROUP_SIZE, 0);
+    const uint output_offset = OUTPUT_GET_INDEX(b, f, y_grp * QUANTIZE_GROUP_SIZE, 0);
+    const uint quantize_block = QUANTIZE_GROUP_SIZE / 4;
+    half4 input_0[quantize_block];
+    char4 quantized_value[quantize_block];
+    half  max[quantize_block];
+
+    unroll_for (uint i = 0 ; i < quantize_block; ++i) {
+        input_0[i] = vload4(0, &input[input_offset + i * 4]);
+        max[i] = fmax(fmax(fabs(input_0[i][0]), fabs(input_0[i][1])), fmax(fabs(input_0[i][2]), fabs(input_0[i][3])));
+    }
+
+    half max_value = fmax(0.001h, max[0]);
+    for (uint i = 1; i < quantize_block; i++) {
+        max_value = fmax(max_value, max[i]);
+    }
+
+    half quan_scale = 128.0h / max_value;
+
+    unroll_for (uint i = 0 ; i < quantize_block; ++i) {
+        quantized_value[i] = convert_char4(input_0[i] * (half4)quan_scale);
+        vstore4(quantized_value[i], 0, &output[output_offset + i * 4]);
+    }
+
+    output_scale[OUTPUT1_GET_INDEX(b, f, y_grp, 0)] = 1.0h / quan_scale;
+}
+
+#else // !(QUANTIZE_GROUP_SIZE <= 128)
+
 REQD_SUB_GROUP_SIZE(SIMD)
 KERNEL(dynamic_quantize_gpu_opt)(
     OPTIONAL_SHAPE_INFO_ARG
@@ -78,3 +118,4 @@ KERNEL(dynamic_quantize_gpu_opt)(
     if (sglid == 0 && local_id == 0)
         output_scale[bf] = 1.0h / scale;
 }
+#endif  // QUANTIZE_GROUP_SIZE <= 128

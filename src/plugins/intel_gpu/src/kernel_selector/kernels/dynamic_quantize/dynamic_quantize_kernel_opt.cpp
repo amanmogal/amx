@@ -68,6 +68,7 @@ JitConstants DynamicQuantizeKernelOpt::GetJitConstants(const dynamic_quantize_pa
     jit.AddConstant(MakeJitConstant("TOTAL_BLOCK_NUM", total_block_num));
     jit.AddConstant(MakeJitConstant("ALIGNED_BLOCK_NUM", aligned_block_num));
     jit.AddConstant(MakeJitConstant("BLOCK_NUM", block_num));
+    jit.AddConstant(MakeJitConstant("QUANTIZE_GROUP_SIZE", params.group_sizes.back()));
     jit.Merge(GetTensorFriendlyWorkGroupsJit(params.outputs[0]));
 
     return jit;
@@ -76,15 +77,20 @@ JitConstants DynamicQuantizeKernelOpt::GetJitConstants(const dynamic_quantize_pa
 CommonDispatchData DynamicQuantizeKernelOpt::SetDefault(const dynamic_quantize_params& params) const {
     CommonDispatchData dispatchData;
 
-    auto vec_size = get_match_vector_size(params);
-    auto bf_size = get_input_bf_size(params);
-    size_t total_block_num = bf_size.second / (simd * vec_size);
-    size_t batch = get_input_bf_size(params).first;
-    size_t block_num = (total_block_num > 32) ? 32 : total_block_num;
+    if (params.group_sizes.back() <= 128) {
+        auto bf_size = get_input_bf_size(params);
+        dispatchData.gws = {bf_size.first, bf_size.second / params.group_sizes.back(), 1};
+        dispatchData.lws = {1, 1, 1};
+    } else {
+        auto vec_size = get_match_vector_size(params);
+        auto bf_size = get_input_bf_size(params);
+        size_t total_block_num = bf_size.second / (simd * vec_size);
+        size_t batch = get_input_bf_size(params).first;
+        size_t block_num = (total_block_num > 32) ? 32 : total_block_num;
 
-    dispatchData.gws = {simd, block_num, batch};
-    dispatchData.lws = {simd, block_num, 1};
-
+        dispatchData.gws = {simd, block_num, batch};
+        dispatchData.lws = {simd, block_num, 1};
+    }
     return dispatchData;
 }
 
@@ -157,8 +163,10 @@ bool DynamicQuantizeKernelOpt::Validate(const Params& params) const {
     if (dq_params.append_axis != -1)
         return false;
 
-    if (dq_params.group_sizes.back() != UINT64_MAX)
-        return false;
+    for (size_t i = 0; i < dq_params.group_sizes.size() - 1; i++) {
+        if (dq_params.group_sizes[i] != 1)
+            return false;
+    }
 
     // Allow only default scales order
     const auto& scales_output_order = dq_params.scales_output_order;
