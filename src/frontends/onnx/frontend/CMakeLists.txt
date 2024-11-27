@@ -77,6 +77,11 @@ ov_add_frontend(NAME onnx
                 FILEDESCRIPTION "FrontEnd to load and convert ONNX file format"
                 LINK_LIBRARIES openvino_onnx_common openvino::core::dev)
 
+# Required to build it in a strict order in case onnx_common contains onnx headers
+if(NOT ONNX_FOUND)
+    add_dependencies(openvino_onnx_frontend openvino_onnx_common)
+endif()
+
 set(ONNX_OPSET_VERSION 21 CACHE INTERNAL "Supported version of ONNX operator set")
 target_compile_definitions(${TARGET_NAME} PRIVATE ONNX_OPSET_VERSION=${ONNX_OPSET_VERSION})
 
@@ -85,6 +90,4 @@ if(BUILD_SHARED_LIBS)
 endif()
 
 ov_ncc_naming_style(FOR_TARGET ${TARGET_NAME}
-                    SOURCE_DIRECTORIES "${${TARGET_NAME}_INCLUDE_DIR}"
-                    DEFINITIONS
-                        $<TARGET_PROPERTY:onnx,INTERFACE_COMPILE_DEFINITIONS>)
+                    SOURCE_DIRECTORIES "${${TARGET_NAME}_INCLUDE_DIR}")
