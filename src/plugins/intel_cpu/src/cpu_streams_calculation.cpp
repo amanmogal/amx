@@ -544,9 +544,9 @@ int get_model_prefer_threads(const int num_streams,
                              const std::shared_ptr<ov::Model>& model,
                              Config& config) {
     const int sockets = get_num_sockets();
+    const auto isa = dnnl::get_effective_cpu_isa();
     auto model_prefer = 0;
     if (-1 == config.modelPreferThreads) {
-        const auto isa = dnnl::get_effective_cpu_isa();
         float isaSpecificThreshold = 1.0f;
         switch (isa) {
         case dnnl::cpu_isa::sse41:
@@ -630,7 +630,8 @@ int get_model_prefer_threads(const int num_streams,
 
     // latency
     if (num_streams <= sockets && num_streams > 0) {
-        if (proc_type_table[0][EFFICIENT_CORE_PROC] > 0 && proc_type_table[0][MAIN_CORE_PROC] > 0) {
+        if (proc_type_table.size() == 1 && proc_type_table[0][EFFICIENT_CORE_PROC] > 0 &&
+            proc_type_table[0][MAIN_CORE_PROC] > 0) {
 #ifdef __APPLE__
             if ((proc_type_table.size() == 1) && (proc_type_table[0][EFFICIENT_CORE_PROC] > 0)) {
                 model_prefer = proc_type_table[0][MAIN_CORE_PROC] > proc_type_table[0][EFFICIENT_CORE_PROC]
@@ -643,11 +644,14 @@ int get_model_prefer_threads(const int num_streams,
             const int int8_threshold = 4;  // ~relative efficiency of the VNNI-intensive code for Big vs Little cores;
             const int fp32_threshold = 2;  // ~relative efficiency of the AVX2 fp32 code for Big vs Little cores;
             // By default the latency case uses (faster) Big cores only, depending on the compute ratio
-            // But on MTL detected by ov::get_number_of_blocked_cores(), use Big and Little cores together in Big
+            // But on MTL or ARL detected by ov::get_thread_cpu_type(), use Big and Little cores together in Big
             // cores only cases except LLM.
+            auto thread_cpu_type = ov::get_thread_cpu_type();
             model_prefer = proc_type_table[0][MAIN_CORE_PROC] > (proc_type_table[0][EFFICIENT_CORE_PROC] /
                                                                  (int8_intensive ? int8_threshold : fp32_threshold))
-                               ? ((!llm_related && ov::get_number_of_blocked_cores())
+                               ? ((!llm_related && ((thread_cpu_type == ThreadCPUType::THEAD_CPU_BLOCK_CORE) ||
+                                                    ((thread_cpu_type == ThreadCPUType::THEAD_CPU_ONE_L3_CACHE) &&
+                                                     (isa == dnnl::cpu_isa::avx2_vnni_2))))
                                       ? proc_type_table[0][MAIN_CORE_PROC] + proc_type_table[0][EFFICIENT_CORE_PROC]
                                       : proc_type_table[0][MAIN_CORE_PROC])
                                : proc_type_table[0][MAIN_CORE_PROC] + proc_type_table[0][EFFICIENT_CORE_PROC];
