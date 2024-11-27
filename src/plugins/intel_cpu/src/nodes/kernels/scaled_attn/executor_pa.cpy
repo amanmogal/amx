@@ -956,7 +956,7 @@ struct MHAHelper {
             // 1 1 0 0 ...
             // 1 1 1 0 ...
             // just computing the positions of 1 should be enough
-            //{auto perf1 = LinuxPerf::Profile("qk");
+            {auto perf1 = LinuxPerf::Profile("qk");
             for (size_t k_blk = 0; k_blk < cur_kv_len_blocks; k_blk++) {
                 auto* k_ptr = qk_scratch_b.ptr<DATA_TYPE>(k_blk, hk);
                 _qk_gemm[q_cnt - 1]->executeGemm(q_cnt < _block_size,
@@ -966,9 +966,9 @@ struct MHAHelper {
                                                  _wsp.data() + ithr * _wsp_size_per_thread,
                                                  _qk_scratch_a ? _qk_scratch_a.ptr<DATA_TYPE>(ithr, 0) : nullptr);
             }
-            //}
+            }
 
-            //{auto perf1 = LinuxPerf::Profile("soft");
+            {auto perf1 = LinuxPerf::Profile("soft");
             for (size_t m = q_start; m < q_end; m++) {
                 // apply attention mask & sofmax
                 auto ncausal = (cur_kv_len - q_cnt + (m - q_start) + 1);
@@ -1019,8 +1019,8 @@ struct MHAHelper {
                     cvt_copy(score_output + h * rnd_up(cur_kv_len, 16), reinterpret_cast<DATA_TYPE*>(score), cur_kv_len);
                 }
             }
-            //}
-            //auto perf1 = LinuxPerf::Profile("kv");
+            }
+            auto perf1 = LinuxPerf::Profile("kv");
             // reuse float buffer, need to use float to compute offset
             auto* w_ptr = reinterpret_cast<DATA_TYPE*>(_weight.ptr<float>(ithr, h, 0, 0));
             float* fp32_out_ptr = q_is_xf16 ? _output.ptr<float>(ithr, 0, h, 0) : output_emb.ptr<float>(q_start, h * _SV);
@@ -1168,13 +1168,11 @@ struct MHAHelper {
         _weight_bhl.resize<float>({B, _H, q_len, rnd_up(max_context_len, std::max(_block_size, size_t{16}))});
 
         // the small batches  static scheduler has small overhead
-        bool prefer_static_loop;
-        bool loop_hk = B * kv_len_in_blocks * _Hk > 2 * _nthr;
+        bool prefer_static_loop = true;
         if (B <= 32) {
-            prefer_static_loop = true;
             // small batch path
             auto kv_len = past_lens.ptr<int32_t>()[0];
-            for (size_t b = 1; b < B; b++) {
+            for (int b = 1; b < B; b++) {
                 if (past_lens.ptr<int32_t>()[b] != kv_len)
                     prefer_static_loop = false;
             }
@@ -1182,19 +1180,9 @@ struct MHAHelper {
             // big batch, probably it's vllm path, skip the test to save the cost
             prefer_static_loop = false;
         }
-        //auto perf1 = LinuxPerf::Profile(prefer_static_loop ? "s1" : "d1");
-        auto loop_qk = [&](size_t b, size_t pk_in_blocks, size_t hx) {
+        auto perf1 = LinuxPerf::Profile(prefer_static_loop ? "s1" : "d1");
+        auto loop_qk = [&](size_t b, size_t pk_in_blocks, size_t hk) {
             auto context_len = static_cast<size_t>(past_lens.ptr<int32_t>()[b]) + 1;
-            size_t hk, hq_beg, hq_end;
-            if (loop_hk) {
-                hk = hx;
-                hq_beg = hk * _h_each_group_len;
-                hq_end = (hk + 1) * _h_each_group_len;
-            } else {
-                hq_beg = hx;
-                hq_end = hx + 1;
-                hk = hx / _h_each_group_len;
-            }
             // kv_len must be valid
             auto pk = pk_in_blocks * _block_size;
             if (pk < context_len) {
@@ -1202,7 +1190,7 @@ struct MHAHelper {
                 if (one_of(_fastpath_valid_prec, ov::element::bf16, ov::element::f16)) {
                     _gemv->tile_config();
                     for (size_t pq = 0; pq < q_len; pq++) {
-                        for (size_t h = hq_beg; h < hq_end; h++) {
+                        for (size_t h = hk * _h_each_group_len; h < (hk + 1) * _h_each_group_len; h++) {
                             (*_gemv)(query.ptr<DATA_TYPE>(b, h, pq), present_key.ptr<KVCACHE_TYPE>(block_number, hk),
                                 _weight_bhl.ptr<float>(b, h, pq) + pk);
                         }
@@ -1210,7 +1198,7 @@ struct MHAHelper {
                     _gemv->tile_release();
                 } else {
                     for (size_t pq = 0; pq < q_len; pq++) {
-                        for (size_t h = hq_beg; h < hq_end; h++) {
+                        for (size_t h = hk * _h_each_group_len; h < (hk + 1) * _h_each_group_len; h++) {
                             dot_product_block(query.ptr<DATA_TYPE>(b, h, pq), present_key.ptr<KVCACHE_TYPE>(block_number, hk),
                                 _weight_bhl.ptr<float>(b, h, pq) + pk, _S, std::min(_block_size, context_len - pk));
                         }
@@ -1243,10 +1231,10 @@ struct MHAHelper {
                                        alibi_slope);
         };
         if (prefer_static_loop) {
-            parallel_for3d(B, kv_len_in_blocks, loop_hk ? _Hk : _H, loop_qk);
+            parallel_for3d(B, kv_len_in_blocks, _Hk, loop_qk);
             parallel_for3d(B, _H, q_len, loop_softmax);
         } else {
-            parallel_for3d_dynamic(B, kv_len_in_blocks, loop_hk ? _Hk : _H, loop_qk);
+            parallel_for3d_dynamic(B, kv_len_in_blocks, _Hk, loop_qk);
             parallel_for3d_dynamic(B, _H, q_len, loop_softmax);
         }
 
@@ -1262,45 +1250,63 @@ struct MHAHelper {
 
         // attn_w * V
         _output_bhl.resize<float>({static_cast<size_t>(_nthr), B, q_len, _H, _SV});
-        // m_attn_w {B, H, q_len, kv_len}
-        parallel_nt_static(_nthr, [&](const size_t ithr, const size_t nthr) {
-            memset(_output_bhl.ptr<float>(ithr, 0, 0, 0, 0), 0, _output_bhl.stride(0) * sizeof(float));
-        });
+        if (!prefer_static_loop) {
+            // m_attn_w {B, H, q_len, kv_len}
+            parallel_nt_static(_nthr, [&](const size_t ithr, const size_t nthr) {
+                memset(_output_bhl.ptr<float>(ithr, 0, 0, 0, 0), 0, _output_bhl.stride(0) * sizeof(float));
+            });
 
-        auto loop_wk = [&](size_t b, size_t pv_in_blocks, size_t hx) {
-            auto ithr = parallel_get_thread_num();
-            auto context_len = static_cast<size_t>(past_lens.ptr<int32_t>()[b]) + 1;
-            auto pv = pv_in_blocks * _block_size;
-            size_t hk, hq_beg, hq_end;
-            if (loop_hk) {
-                hk = hx;
-                hq_beg = hk * _h_each_group_len;
-                hq_end = (hk + 1) * _h_each_group_len;
-            } else {
-                hq_beg = hx;
-                hq_end = hx + 1;
-                hk = hx / _h_each_group_len;
-            }
-            // kv_len must be valid
-            if (pv < context_len) {
-                auto block_number = block_indices.ptr<int32_t>()[block_indices_begins.ptr<int32_t>()[b] + pv_in_blocks];
-                auto* v = present_value.ptr<KVCACHE_TYPE>(block_number, hk);
-                for (size_t pq = 0; pq < q_len; pq++) {
-                    for (size_t h = hq_beg; h < hq_end; h++) {
-                        attn_acc_value_block(_output_bhl.ptr<float>(ithr, b, pq, h),
-                                             _weight_bhl.ptr<float>(b, h, pq) + pv,
-                                             v,
-                                             _SV,
-                                             std::min(_block_size, context_len - pv));
+            parallel_for3d_dynamic(B, kv_len_in_blocks, _Hk, [&](size_t b, size_t pv_in_blocks, size_t hk) {
+                auto ithr = parallel_get_thread_num();
+                auto context_len = static_cast<size_t>(past_lens.ptr<int32_t>()[b]) + 1;
+                auto pv = pv_in_blocks * _block_size;
+                // kv_len must be valid
+                if (pv < context_len) {
+                    auto block_number = block_indices.ptr<int32_t>()[block_indices_begins.ptr<int32_t>()[b] + pv_in_blocks];
+                    auto* v = present_value.ptr<KVCACHE_TYPE>(block_number, hk);
+                    for (size_t pq = 0; pq < q_len; pq++) {
+                        for (size_t h = hk * _h_each_group_len; h < (hk + 1) * _h_each_group_len; h++) {
+                            attn_acc_value_block(_output_bhl.ptr<float>(ithr, b, pq, h),
+                                                _weight_bhl.ptr<float>(b, h, pq) + pv,
+                                                v,
+                                                _SV,
+                                                std::min(_block_size, context_len - pv));
+                        }
                     }
                 }
-            }
-        };
-
-        if (prefer_static_loop) {
-            parallel_for3d(B, kv_len_in_blocks, loop_hk ? _Hk : _H, loop_wk);
+            });
         } else {
-            parallel_for3d_dynamic(B, kv_len_in_blocks, loop_hk ? _Hk : _H, loop_wk);
+            parallel_nt_static(_nthr, [&](const size_t ithr, const size_t nthr) {
+            //auto loop_wk_static = [&](size_t b, size_t pv_in_blocks, size_t hk) {
+                //auto ithr = parallel_get_thread_num();
+                size_t start{0}, end{0};
+                //B, kv_len_in_blocks, _Hk
+                splitter(B * kv_len_in_blocks * _Hk, nthr, ithr, start, end);
+
+                //memset(buf_attn_score.ptr<T3>(ithr, 0, 0, 0, 0), 0, buf_attn_score.stride(0) * sizeof(T3));
+                memset(_output_bhl.ptr<float>(ithr, 0, 0, 0, 0), 0, _output_bhl.stride(0) * sizeof(float));
+
+                size_t b, pv_in_blocks, hk;
+                if (start < end) {
+                    parallel_it_init(start, b, B, pv_in_blocks, kv_len_in_blocks, hk, _Hk);
+                    auto context_len = static_cast<size_t>(past_lens.ptr<int32_t>()[b]) + 1;
+                    auto pv = pv_in_blocks * _block_size;
+                    // kv_len must be valid
+                    if (pv < context_len) {
+                        auto block_number = block_indices.ptr<int32_t>()[block_indices_begins.ptr<int32_t>()[b] + pv_in_blocks];
+                        auto* v = present_value.ptr<KVCACHE_TYPE>(block_number, hk);
+                        for (size_t pq = 0; pq < q_len; pq++) {
+                            for (size_t h = hk * _h_each_group_len; h < (hk + 1) * _h_each_group_len; h++) {
+                                attn_acc_value_block(_output_bhl.ptr<float>(ithr, b, pq, h),
+                                                    _weight_bhl.ptr<float>(b, h, pq) + pv,
+                                                    v,
+                                                    _SV,
+                                                    std::min(_block_size, context_len - pv));
+                            }
+                        }
+                    }
+                }
+            });
         }
 
         parallel_for3d(B, _H, q_len, [&](size_t b, size_t h, size_t pq) {
@@ -1437,7 +1443,7 @@ struct MHA {
         _helper.init_reorder_buffers(_workitems.get_reorder_max_batch_size(), div_up(_workitems.get_reorder_max_kv_len(), _helper._block_size));
 
         // packed k, v
-        //{auto perf1 = LinuxPerf::Profile("trans");
+        {auto perf1 = LinuxPerf::Profile("trans");
         parallel_for2d_dynamic(reorder_work_count, Hk, [&](size_t w, size_t hk) {
             const auto& item = _workitems.get_reorder_work_item(w);
             const auto batch_in_seq = item.batch_in_seq;
@@ -1470,13 +1476,11 @@ struct MHA {
                 }
             }
         });
-        //}
+        }
 
-        // loop along HK dimension: if elements count is enough, loop HK to reuse KV in the CPU cache
-        //    else if elements count is small, prefer to loop H to get more work to avoid thread imbalance
-        bool loop_hk = attn_work_count * Hk > 2 * _helper._nthr;
-        //auto perf1 = LinuxPerf::Profile("fma");
-        parallel_for2d_dynamic(attn_work_count, loop_hk ? Hk : _helper._H, [&](size_t w, size_t hx) {
+        bool loop_hk = true;
+        auto perf1 = LinuxPerf::Profile("fma");
+        auto loop = [&](size_t w, size_t hx) {
             size_t hk, hq_beg, hq_end;
             if (loop_hk) {
                 hk = hx;
@@ -1493,7 +1497,7 @@ struct MHA {
             const auto batch_in_token = subsequence_begins.ptr<int32_t>()[batch_in_seq];
             const auto q_len = static_cast<size_t>(item.q_len);
             size_t ithr = parallel_get_thread_num();
-            //auto perf1 = LinuxPerf::Profile(loop_hk ? "loophk" : "looph");
+            auto perf1 = LinuxPerf::Profile(loop_hk ? "loophk" : "looph");
 
             if (q_len == 1) {
                 const auto cur_kv_len = static_cast<size_t>(past_lens.ptr<int32_t>()[batch_in_seq]) + 1;
@@ -1541,8 +1545,15 @@ struct MHA {
                     alibi_slopes,
                     score_output);
             }
-        });
-
+        };
+        if (attn_work_count * Hk > 2 * _helper._nthr) {
+            // loop along HK dimension: if elements count is enough, loop HK to reuse KV in the CPU cache
+            parallel_for2d_dynamic(attn_work_count, Hk, loop);
+        } else {
+            // if elements count is small, prefer to loop H to get more work to avoid thread imbalance
+            loop_hk = false;
+            parallel_for2d_dynamic(attn_work_count, _helper._H, loop);
+        }
         if (output_score) {
             parallel_for2d_dynamic(past_lens.m_dims[0], 1, [&](size_t b, size_t pq) {
                 auto seq_len = static_cast<size_t>(subsequence_begins.ptr<int32_t>()[b + 1] - subsequence_begins.ptr<int32_t>()[b]);
@@ -1569,13 +1580,12 @@ struct MHA {
                     const PlainTensor& block_indices,
                     const PlainTensor& block_indices_begins,
                     const PlainTensor& alibi_slopes) {
-        //{auto perf1 = LinuxPerf::Profile("1init");
+        {auto perf1 = LinuxPerf::Profile("1init");
         _workitems.reset(query, past_lens, subsequence_begins, _helper._block_size);
         if (output_score)
-            _helper.init_score_buffers(past_lens, subsequence_begins);
-        //}
+            _helper.init_score_buffers(past_lens, subsequence_begins);}
 
-        //auto perf1 = LinuxPerf::Profile("1w");
+        auto perf1 = LinuxPerf::Profile("1w");
         auto nthr = static_cast<size_t>(parallel_get_max_threads());
 
         if (past_lens.m_dims[0] >= nthr || _workitems.get_reorder_max_batch_size() > 0) {
@@ -1593,14 +1603,13 @@ struct AttentionExecutor : public PagedAttentionExecutor {
     MHAHelper<DATA_TYPE, KVCACHE_TYPE> _helper;
     MHA<DATA_TYPE, KVCACHE_TYPE> _kernel;
     PlainTensor _slot_mapping;
-    PagedAttentionFuseConfig _fuse_config;
 
-    AttentionExecutor(const PagedAttentionFuseConfig& config) : _kernel(_helper), _fuse_config(config) {}
+    AttentionExecutor() : _kernel(_helper) {}
 
     void init(const std::vector<MemoryPtr>& inputs, const std::vector<MemoryPtr>& outputs, PlainTensor& q, PlainTensor& k, PlainTensor& v, PlainTensor& k_cache,
         PlainTensor& v_cache, PlainTensor& past_lens, PlainTensor& subsequence_begins, PlainTensor& block_indices, PlainTensor& block_indices_begins,
         float& scale, size_t& sliding_window, PlainTensor& alibi_slopes, size_t& max_context_len, PlainTensor& output_emb, PlainTensor& output_score) {
-        //{auto perf1 = LinuxPerf::Profile("init1");
+        {auto perf1 = LinuxPerf::Profile("init1");
         q.reset(inputs[ID_Q]);                                      // [B_token, H * S]
         k.reset(inputs[ID_K]);
         v.reset(inputs[ID_V]);
@@ -1609,8 +1618,8 @@ struct AttentionExecutor : public PagedAttentionExecutor {
         past_lens.reset(inputs[ID_PAST_LENS]);                      // [B_seq]
         subsequence_begins.reset(inputs[ID_SUBSEQUENCE_BEGINS]);    // [B_seq+1]
         block_indices.reset(inputs[ID_BLOCK_INDICES]);              // [num_blocks]
-        block_indices_begins.reset(inputs[ID_BLOCK_INDICES_BEGINS]);// [B_seq+1]
-        //{auto perf1 = LinuxPerf::Profile("init2");
+        block_indices_begins.reset(inputs[ID_BLOCK_INDICES_BEGINS]);}// [B_seq+1]
+        {auto perf1 = LinuxPerf::Profile("init2");
         scale = *inputs[ID_SCALE]->getDataAs<float>();
         sliding_window = static_cast<size_t>(*inputs[ID_SLIDING_WINDOW]->getDataAs<int32_t>());
         if (!inputs[ID_ALIBI_SLOPES]->getShape().hasZeroDims())
@@ -1618,25 +1627,7 @@ struct AttentionExecutor : public PagedAttentionExecutor {
         max_context_len = static_cast<size_t>(*inputs[ID_MAX_CONTEXT_LEN]->getDataAs<int32_t>());
         output_emb.reset(outputs[0]);
         if (outputs.size() == 2)
-            output_score.reset(outputs[1]);
-
-        if (_fuse_config.fuse_reshape_split) {
-            // fused q shape [1, batch, head_num_q, head_size] -> spec [batch, hidden_size]
-            q = q.reshape({q.m_dims[1], q.m_dims[2] * q.m_dims[3]});
-            // fused v shape [1, batch, (head_num_q + head_num_k * 2) * head_size] -> [B, Hk, 1, v_head_size]
-            size_t strides[4];
-            strides[0] = v.stride(1);
-            strides[1] = _fuse_config.v_head_size;
-            strides[2] = _fuse_config.v_head_size;
-            strides[3] = 1;
-            v.resize({v.m_dims[1], k.m_dims[2], 1, _fuse_config.v_head_size},
-                v.ptr<DATA_TYPE>(0, 0, _fuse_config.slice_start),
-                strides);
-            // fused k shape [1, batch, head_num_k, head_size] -> spec [batch, hidden_size]
-            k = k.reshape({k.m_dims[1], k.m_dims[2] * k.m_dims[3]});
-            // output shape [1, batch, output_hidden_size] -> spec [batch, output_hidden_size]
-            output_emb = output_emb.reshape({output_emb.m_dims[1], output_emb.m_dims[2]});
-        }
+            output_score.reset(outputs[1]);}
 
         auto B_token = q.size(0);
         auto Hk = k_cache.size(1);
@@ -1655,14 +1646,10 @@ struct AttentionExecutor : public PagedAttentionExecutor {
 
         q.assert_dims({B_token, H * S});
         k.assert_dims({B_token, Hk * S});
+        v.assert_dims({B_token, Hk * SV});
         q = q.reshape({B_token, H, 1, S});
         k = k.reshape({B_token, Hk, 1, S});
-        if (_fuse_config.fuse_reshape_split) {
-            v.assert_dims({B_token, Hk, 1, SV});
-        } else {
-            v.assert_dims({B_token, Hk * SV});
-            v = v.reshape({B_token, Hk, 1, SV});
-        }
+        v = v.reshape({B_token, Hk, 1, SV});
         if (k_cache.m_dt == ov::element::Type_t::u8) {
             k_cache.assert_dims({0, Hk, block_size, S + sizeof(float) * 2}, true);
             v_cache.assert_dims({k_cache.m_dims[0], Hk, block_size, SV + sizeof(float) * 2});
@@ -1684,7 +1671,7 @@ struct AttentionExecutor : public PagedAttentionExecutor {
 
         // TODO: enable block_size to be multiple of 32
         OPENVINO_ASSERT(block_size == 32, "CPU: block size must be 32, current: ", block_size);
-        //auto perf1 = LinuxPerf::Profile("init3");
+        auto perf1 = LinuxPerf::Profile("init3");
         _helper.init(H, S, SV, Hk, h_each_group_len, block_size, sliding_window, scale, max_context_len, alibi_slopes);
     }
 
@@ -1723,30 +1710,29 @@ struct AttentionExecutor : public PagedAttentionExecutor {
         PlainTensor output_emb;
         PlainTensor output_score;
 
-        // {auto perf1 = LinuxPerf::Profile("init");
+        {auto perf1 = LinuxPerf::Profile("init");
         init(inputs, outputs, q, k, v, k_cache, v_cache, past_lens, subsequence_begins, block_indices, block_indices_begins,
-            scale, sliding_window, alibi_slopes, max_context_len, output_emb, output_score);
-        //{auto perf1 = LinuxPerf::Profile("concat");
-        concat_pastkv(k, v, k_cache, v_cache, past_lens, subsequence_begins, block_indices, block_indices_begins);
-        //auto perf1 = LinuxPerf::Profile("kernel");
+            scale, sliding_window, alibi_slopes, max_context_len, output_emb, output_score);}
+        {auto perf1 = LinuxPerf::Profile("concat");
+        concat_pastkv(k, v, k_cache, v_cache, past_lens, subsequence_begins, block_indices, block_indices_begins);}
+        auto perf1 = LinuxPerf::Profile("kernel");
         _kernel(q, k_cache, v_cache, output_emb, output_score, max_context_len, past_lens, subsequence_begins, block_indices,
             block_indices_begins, alibi_slopes);
     }
 };
 #endif
 
-std::shared_ptr<PagedAttentionExecutor> make_pa_executor(ov::element::Type data_type, ov::element::Type kvcache_type,
-    const PagedAttentionFuseConfig& config) {
+std::shared_ptr<PagedAttentionExecutor> make_pa_executor(ov::element::Type data_type, ov::element::Type kvcache_type) {
     std::shared_ptr<PagedAttentionExecutor> executor;
 
 #ifdef OPENVINO_ARCH_X86_64
     if (data_type == ov::element::bf16) {
 #if defined(HAVE_AVX512F)
         if (kvcache_type == ov::element::u8) {
-            executor = std::make_shared<AttentionExecutor<ov::bfloat16, uint8_t>>(config);
+            executor = std::make_shared<AttentionExecutor<ov::bfloat16, uint8_t>>();
         } else {
             OPENVINO_ASSERT(kvcache_type == ov::element::bf16, "expect kvcache type bf16, current: ", kvcache_type);
-            executor = std::make_shared<AttentionExecutor<ov::bfloat16, ov::bfloat16>>(config);
+            executor = std::make_shared<AttentionExecutor<ov::bfloat16, ov::bfloat16>>();
         }
 #else
         OPENVINO_THROW("make_pa_executor: bf16 needs avx512+ hardware.");
@@ -1754,22 +1740,22 @@ std::shared_ptr<PagedAttentionExecutor> make_pa_executor(ov::element::Type data_
     } else if (data_type == ov::element::f16) {
 #if defined(HAVE_AVX512F)
         if (kvcache_type == ov::element::u8) {
-            executor = std::make_shared<AttentionExecutor<ov::float16, uint8_t>>(config);
+            executor = std::make_shared<AttentionExecutor<ov::float16, uint8_t>>();
         } else {
             OPENVINO_ASSERT(kvcache_type == ov::element::f16, "expect kvcache type f16, current: ", kvcache_type);
-            executor = std::make_shared<AttentionExecutor<ov::float16, ov::float16>>(config);
+            executor = std::make_shared<AttentionExecutor<ov::float16, ov::float16>>();
         }
 #else
      OPENVINO_THROW("make_pa_executor: f16 needs avx512+ hardware.");
 #endif
     } else if (data_type == ov::element::f32) {
         if (kvcache_type == ov::element::u8) {
-            executor = std::make_shared<AttentionExecutor<float, uint8_t>>(config);
+            executor = std::make_shared<AttentionExecutor<float, uint8_t>>();
         } else if (kvcache_type == ov::element::f16) {
-            executor = std::make_shared<AttentionExecutor<float, ov::float16>>(config);
+            executor = std::make_shared<AttentionExecutor<float, ov::float16>>();
         } else {
             OPENVINO_ASSERT(kvcache_type == ov::element::f32, "expect kvcache type f32, current: ", kvcache_type);
-            executor = std::make_shared<AttentionExecutor<float, float>>(config);
+            executor = std::make_shared<AttentionExecutor<float, float>>();
         }
     } else {
         OPENVINO_THROW("make_pa_executor: unsupported precision: ", data_type);
