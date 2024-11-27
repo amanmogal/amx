@@ -9,6 +9,7 @@
 #include <openvino/opsets/opset13.hpp>
 #include <openvino/opsets/opset14.hpp>
 #include <openvino/opsets/opset15.hpp>
+#include <openvino/opsets/opset16.hpp>
 #include <openvino/opsets/opset2.hpp>
 #include <openvino/opsets/opset5.hpp>
 #include <openvino/opsets/opset6.hpp>
@@ -62,6 +63,7 @@
 #include "gru_cell_shape_inference.hpp"
 #include "gru_sequence_shape_inference.hpp"
 #include "i420_shape_inference.hpp"
+#include "identity_shape_inference.hpp"
 #include "interpolate_shape_inference.hpp"
 #include "inverse_shape_inference.hpp"
 #include "irdft_shape_inference.hpp"
@@ -405,6 +407,8 @@ using IStaticShapeInferFactory =
 // To use other version of operators, explicitly specify operator with opset version namespace.
 template <>
 const IStaticShapeInferFactory::TRegistry IStaticShapeInferFactory::registry{
+    // opset16
+    _OV_OP_SHAPE_INFER_MASK_REG(op::v16::Identity, ShapeInferTA, util::bit::mask()),
     // opset15
     _OV_OP_SHAPE_INFER_MASK_REG(op::v15::Squeeze, ShapeInferTA, util::bit::mask(1)),
     _OV_OP_SHAPE_INFER_MASK_REG(op::v15::SearchSorted, ShapeInferTA, util::bit::mask()),

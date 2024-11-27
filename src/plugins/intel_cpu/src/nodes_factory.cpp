@@ -48,6 +48,7 @@
 #include "nodes/llm_mlp.h"
 #include "nodes/qkv_proj.h"
 #include "nodes/interpolate.h"
+#include "nodes/identity.hpp"
 #include "nodes/inverse.hpp"
 #include "nodes/log_softmax.h"
 #include "nodes/lrn.h"
@@ -202,6 +203,7 @@ Node::NodesFactory::NodesFactory() : Factory("NodesFactory") {
     INTEL_CPU_NODE(Ngram, Type::Ngram);
     INTEL_CPU_NODE(RoPE, Type::RoPE);
     INTEL_CPU_NODE(CausalMaskPreprocess, Type::CausalMaskPreprocess);
+    INTEL_CPU_NODE(Identity, Type::Identity);
     INTEL_CPU_NODE(Interpolate, Type::Interpolate);
     INTEL_CPU_NODE(Inverse, Type::Inverse);
     INTEL_CPU_NODE(RandomUniform, Type::RandomUniform);
