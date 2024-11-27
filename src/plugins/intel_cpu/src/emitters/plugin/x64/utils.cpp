@@ -120,6 +120,7 @@ void EmitABIRegSpills::postamble() {
         }
     }
     h->add(h->rsp, m_bytes_to_spill);
+    m_regs_to_spill.clear();
     // Update the status
     spill_status = true;
 }

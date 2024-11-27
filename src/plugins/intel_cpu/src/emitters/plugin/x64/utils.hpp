@@ -15,7 +15,7 @@ class EmitABIRegSpills {
 public:
     EmitABIRegSpills(dnnl::impl::cpu::x64::jit_generator* h);
     ~EmitABIRegSpills();
-
+    size_t get_num_spilled_regs() const { return m_regs_to_spill.size(); }
     // push (save) all registers on the stack
     void preamble(const std::set<snippets::Reg>& live_regs = {});
     // pop (take) all registers from the stack

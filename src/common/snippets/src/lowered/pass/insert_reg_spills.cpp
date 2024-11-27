@@ -21,7 +21,6 @@ namespace pass {
 
 bool InsertRegSpills::run(LinearIR& linear_ir) {
     OV_ITT_SCOPED_TASK(ov::pass::itt::domains::SnippetsTransform, "Snippets::InsertRegSpills")
-    return false;
 
     auto needs_reg_spill = [](const ExpressionPtr& expr) {
         return ov::is_type<snippets::op::Brgemm>(expr->get_node());
@@ -42,10 +41,14 @@ bool InsertRegSpills::run(LinearIR& linear_ir) {
 //        }
         const auto begin = std::make_shared<op::RegSpillBegin>();
         const auto end = std::make_shared<op::RegSpillEnd>(begin, regs_to_spill);
-        linear_ir.insert_node(begin, std::vector<PortConnectorPtr>{}, expr->get_loop_ids(),
-                              false, insert_pos, std::vector<std::set<ExpressionPort>>{});
-        linear_ir.insert_node(end, std::vector<PortConnectorPtr>{}, expr->get_loop_ids(),
-                              false, std::next(insert_pos), std::vector<std::set<ExpressionPort>>{});
+        const auto spill_begin_expr = *linear_ir.insert_node(begin, std::vector<PortConnectorPtr>{}, expr->get_loop_ids(),
+                                                             false, insert_pos, std::vector<std::set<ExpressionPort>>{});
+        std::vector<Reg> vregs{regs_to_spill.begin(), regs_to_spill.end()};
+        spill_begin_expr->set_reg_info({{}, vregs});
+
+        const auto spill_end_expr = *linear_ir.insert_node(end, spill_begin_expr->get_output_port_connectors(), expr->get_loop_ids(),
+                                                           false, std::next(insert_pos), std::vector<std::set<ExpressionPort>>{});
+        spill_end_expr->set_reg_info({vregs, {}});
         modified = true;
     }
     return modified;

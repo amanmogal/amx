@@ -83,7 +83,7 @@ void jit_brgemm_emitter::emit_impl(const std::vector<size_t>& in, const std::vec
         mem_ptrs_idxs.emplace_back(in[2]);
 
     EmitABIRegSpills spill(h);
-    spill.preamble();
+//    spill.preamble();
 
     h->mov(h->rbp, reinterpret_cast<uint64_t>(BrgemmKernelExecutor::execute));
     auto reserved_stack_size = sizeof(BrgemmKernelExecutor::call_args);
@@ -120,7 +120,7 @@ void jit_brgemm_emitter::emit_impl(const std::vector<size_t>& in, const std::vec
 
     h->add(h->rsp, reserved_stack_size);
 
-    spill.postamble();
+//    spill.postamble();
 }
 
 }   // namespace intel_cpu

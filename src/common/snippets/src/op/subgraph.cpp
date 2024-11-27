@@ -59,6 +59,7 @@
 #include "snippets/lowered/reg_manager.hpp"
 #include "snippets/lowered/pass/assign_registers.hpp"
 #include "snippets/lowered/pass/init_live_ranges.hpp"
+#include "snippets/lowered/pass/insert_reg_spills.hpp"
 
 #include "transformations/utils/utils.hpp"
 
@@ -513,6 +514,7 @@ void Subgraph::control_flow_transformations(size_t min_parallel_work_amount, siz
     lowered::RegManager reg_manager(get_generator());
     gen_pipeline.register_pass<lowered::pass::InitLiveRanges>(reg_manager);
     gen_pipeline.register_pass<lowered::pass::AssignRegisters>(reg_manager);
+    gen_pipeline.register_pass<lowered::pass::InsertRegSpills>(reg_manager);
     gen_pipeline.register_pass<lowered::pass::InsertSpecificIterations>();
     gen_pipeline.register_pass<lowered::pass::NormalizeLoopIDs>();
     gen_pipeline.register_pass<lowered::pass::ValidateExpandedLoops>();
